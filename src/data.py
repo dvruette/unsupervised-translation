@@ -11,7 +11,7 @@ def get_dataset(dataset_name: bool = "wmt19", stream: bool = True):
         language_pair=("de", "en"),
         subsets={
             Split.TRAIN: ["commoncrawl"],
-            # Split.VALIDATION: ["euelections_dev2019"],
+            Split.VALIDATION: ["newstest2018"],
         },
     )
 
@@ -37,7 +37,7 @@ class DataCollatorForSupervisedMT:
         tgt_text = [x[self.tgt_key] for x in features]
 
         src_tokens = self.src_tokenizer(src_text, padding=True, max_length=512, truncation=True, return_tensors="pt")
-        tgt_tokens = self.tgt_tokenizer(src_text, padding=True, max_length=512, truncation=True, return_tensors="pt")
+        tgt_tokens = self.tgt_tokenizer(tgt_text, padding=True, max_length=512, truncation=True, return_tensors="pt")
         return {
             "input_ids": src_tokens["input_ids"],
             "attention_mask": src_tokens["attention_mask"],
