@@ -1,0 +1,4 @@
+is_huggingface: true
+model_path: t5-small
+src_tokenizer_path: t5-small
+max_new_tokens: 64

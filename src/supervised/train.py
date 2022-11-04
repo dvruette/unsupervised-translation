@@ -18,7 +18,6 @@ from src.supervised.model import SupervisedTranslation
 from src.data import get_dataset, DataCollatorForSupervisedMT
 
 
-
 @hydra.main(config_path="../config", config_name="supervised", version_base="1.1")
 def main(config):
     # load model
