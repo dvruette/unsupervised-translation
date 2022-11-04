@@ -1,7 +1,9 @@
 datasets>=1.6.1
 hydra-core>=1.2.0
 numpy>=1.19.5
+python-dotenv>=0.21.0
 pytorch-lightning>=1.7.7
 torch>=1.12.1
 transformers>=4.23.1
 sacremoses>=0.0.53
+wandb>=0.13.5
