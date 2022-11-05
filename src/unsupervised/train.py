@@ -3,11 +3,14 @@ import os
 
 import hydra
 import pytorch_lightning as pl
+import dotenv
 from torch.utils.data import DataLoader
 
 # add the working directory to $PYTHONPATH
 # needed to make local imports work
 sys.path.append(os.getenv("PWD", "."))
+# load the `.env` file 
+dotenv.load_dotenv()
 
 from src.supervised.model import get_model_and_tokenizer
 from src.supervised.model import SupervisedTranslation

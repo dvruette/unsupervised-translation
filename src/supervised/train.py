@@ -4,14 +4,15 @@ from multiprocessing import freeze_support
 
 import hydra
 import pytorch_lightning as pl
-from dotenv import load_dotenv
+import dotenv
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 # add the working directory to $PYTHONPATH
 # needed to make local imports work
 sys.path.append(os.getenv("PWD", "."))
-load_dotenv()
+# load the `.env` file 
+dotenv.load_dotenv()
 
 from src.supervised.model import get_model_and_tokenizer
 from src.supervised.model import SupervisedTranslation

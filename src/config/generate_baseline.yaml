@@ -3,3 +3,4 @@ model_path: autoencoder.pt
 src_tokenizer_path: bert-base-cased
 tgt_tokenizer_path: deepset/gbert-base
 max_new_tokens: 64
+max_seq_len: 256
