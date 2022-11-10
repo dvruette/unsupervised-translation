@@ -5,6 +5,7 @@ from multiprocessing import freeze_support
 import hydra
 import pytorch_lightning as pl
 import dotenv
+from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
 # add the working directory to $PYTHONPATH
