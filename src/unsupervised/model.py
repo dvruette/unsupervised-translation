@@ -49,24 +49,24 @@ class UnsupervisedTranslation(pl.LightningModule):
         # get latent space of encoder and decoder for language a
         encoder_a_out = self.autoencoder_a.encoder(
             batch["input_ids"],
-            attention_mask=batch["attention_mask"],
+            attention_mask=batch["attention_mask_src"],
         )
         decoder_a_out = self.autoencoder_a.decoder(
             batch["input_ids"],
             encoder_hidden_states=encoder_a_out.last_hidden_state,
-            encoder_attention_mask=batch["attention_mask"],
+            encoder_attention_mask=batch["attention_mask_src"],
         )
         logits_a = decoder_a_out.logits 
 
         # get latent space of encoder and decoder for language b
         encoder_b_out = self.autoencoder_b.encoder(
             batch["labels"],
-            attention_mask=batch["attention_mask"],
+            attention_mask=batch["attention_mask_tgt"],
         )
         decoder_b_out = self.autoencoder_b.decoder(
             batch["labels"],
             encoder_hidden_states=encoder_b_out.last_hidden_state,
-            encoder_attention_mask=batch["attention_mask"], 
+            encoder_attention_mask=batch["attention_mask_tgt"], 
         )
         logits_b = decoder_b_out.logits
 
@@ -78,8 +78,11 @@ class UnsupervisedTranslation(pl.LightningModule):
         # # cross_entropy requires shapes (batch_size, vocab_size, seq_len) and (batch_size, seq_len)
         # loss = F.cross_entropy(logits.transpose(1, 2), labels)
 
+        # maxpool over the second dimension
         z_a = encoder_a_out.last_hidden_state
+        z_a = torch.max(z_a, dim=1)[0]
         z_b = encoder_b_out.last_hidden_state
+        z_b = torch.max(z_b, dim=1)[0]
 
         l_cycle = 2*F.mse_loss(z_a, z_b) # is equal to F.mse_loss(z_a, z_b) + F.mse_loss(z_b, z_a)
 

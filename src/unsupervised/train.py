@@ -15,7 +15,7 @@ load_dotenv()
 
 from src.unsupervised.model import get_tokenizer, get_model
 from src.unsupervised.model import UnsupervisedTranslation
-from src.data import get_dataset, DataCollatorForSupervisedMT
+from src.data import get_dataset, DataCollatorForSupervisedMT, DataCollatorForUnsupervisedMT
 
 
 
@@ -32,7 +32,7 @@ def main(config):
     train_ds = ds["train"].shuffle(buffer_size=4*config.training.batch_size)
     val_ds = ds["validation"]
 
-    collator = DataCollatorForSupervisedMT(tokenizer_a, tokenizer_b)
+    collator = DataCollatorForUnsupervisedMT(tokenizer_a, tokenizer_b)
 
     train_dl = DataLoader(
         train_ds,
