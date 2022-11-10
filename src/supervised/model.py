@@ -1,8 +1,17 @@
+from typing import Optional
+
 import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import transformers
 from transformers import BertConfig, BertModel, BertLMHeadModel, BertTokenizer
+
+class CustomBertLMHeadModel(BertLMHeadModel):
+    def prepare_inputs_for_generation(self, *args, encoder_hidden_states=None, **kwargs):
+        inputs = super().prepare_inputs_for_generation(*args, **kwargs)
+        inputs["encoder_hidden_states"] = encoder_hidden_states
+        return inputs
 
 class AutoEncoder(nn.Module):
     def __init__(self, encoder, decoder):
@@ -17,7 +26,7 @@ class AutoEncoder(nn.Module):
         attention_mask=None,
     ):
         encoder_out = self.encoder(
-            input_ids,
+            input_ids=input_ids,
             attention_mask=attention_mask,
         )
         return self.decoder(
@@ -25,6 +34,22 @@ class AutoEncoder(nn.Module):
             encoder_hidden_states=encoder_out.last_hidden_state,
             encoder_attention_mask=attention_mask,
         )
+
+    @torch.no_grad()
+    def generate(
+        self,
+        input_ids: torch.Tensor,
+        decoder_input_ids: Optional[torch.Tensor] = None,
+        attention_mask: Optional[torch.Tensor] = None,
+        **kwargs
+    ):
+        encoder_out = self.encoder.forward(
+            input_ids=input_ids,
+            attention_mask=attention_mask
+        )
+        encoder_hidden_states = encoder_out.last_hidden_state
+
+        return self.decoder.generate(decoder_input_ids, encoder_hidden_states=encoder_hidden_states, **kwargs)
 
 
 class SupervisedTranslation(pl.LightningModule):
@@ -89,6 +114,6 @@ def get_model_and_tokenizer():
     decoder_config.add_cross_attention = True
 
     encoder = BertModel(encoder_config, add_pooling_layer=False)
-    decoder = BertLMHeadModel(decoder_config)
+    decoder = CustomBertLMHeadModel(decoder_config)
     autoencoder = AutoEncoder(encoder, decoder)
     return autoencoder, encoder_tokenizer, decoder_tokenizer
