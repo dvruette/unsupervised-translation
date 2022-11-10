@@ -27,27 +27,63 @@ class AutoEncoder(nn.Module):
         )
 
 
-class SupervisedTranslation(pl.LightningModule):
-    def __init__(self, autoencoder: AutoEncoder, lr: float = 1e-4):
+class UnsupervisedTranslation(pl.LightningModule):
+    def __init__(self, autoencoder_a: AutoEncoder, autoencoder_b: AutoEncoder, lr: float = 1e-4):
         super().__init__()
-        self.autoencoder = autoencoder
+        self.autoencoder_a = autoencoder_a
+        self.autoencoder_b = autoencoder_b
         self.lr = lr
 
     def get_loss(self, batch):
-        tgt_ids = batch["labels"]  # shape: (batch_size, tgt_seq_len + 1)
-        decoder_input_ids = tgt_ids[:, :-1]  # don't include the last one
-        labels = tgt_ids[:, 1:]  # shift decoder input by 1 to prevent cheating
-        labels = -100*(labels == 0) + labels  # mask labels where there is padding
+        # tgt_ids = batch["labels"]  # shape: (batch_size, tgt_seq_len + 1)
+        # decoder_input_ids = tgt_ids[:, :-1]  # don't include the last one
+        # # labels = tgt_ids[:, 1:]  # shift decoder input by 1 to prevent cheating
+        # # labels = -100*(labels == 0) + labels  # mask labels where there is padding
 
-        output = self.autoencoder(
-            input_ids=batch["input_ids"],
+        # output = self.autoencoder(
+        #     input_ids=batch["input_ids"],
+        #     attention_mask=batch["attention_mask"],
+        #     decoder_input_ids=decoder_input_ids,
+        # )
+
+        # get latent space of encoder and decoder for language a
+        encoder_a_out = self.autoencoder_a.encoder(
+            batch["input_ids"],
             attention_mask=batch["attention_mask"],
-            decoder_input_ids=decoder_input_ids,
         )
+        decoder_a_out = self.autoencoder_a.decoder(
+            batch["input_ids"],
+            encoder_hidden_states=encoder_a_out.last_hidden_state,
+            encoder_attention_mask=batch["attention_mask"],
+        )
+        logits_a = decoder_a_out.logits 
 
-        logits = output.logits  # shape: (batch_size, tgt_seq_len, tgt_vocab_size)
-        # cross_entropy requires shapes (batch_size, vocab_size, seq_len) and (batch_size, seq_len)
-        loss = F.cross_entropy(logits.transpose(1, 2), labels)
+        # get latent space of encoder and decoder for language b
+        encoder_b_out = self.autoencoder_b.encoder(
+            batch["labels"],
+            attention_mask=batch["attention_mask"],
+        )
+        decoder_b_out = self.autoencoder_b.decoder(
+            batch["labels"],
+            encoder_hidden_states=encoder_b_out.last_hidden_state,
+            encoder_attention_mask=batch["attention_mask"], 
+        )
+        logits_b = decoder_b_out.logits
+
+        l_rec_a = F.cross_entropy(logits_a.transpose(1, 2), batch["input_ids"], ignore_index=0)
+        l_rec_b = F.cross_entropy(logits_b.transpose(1, 2), batch["labels"], ignore_index=0)
+        l_rec = l_rec_a + l_rec_b
+
+        # logits = output.logits  # shape: (batch_size, tgt_seq_len, tgt_vocab_size)
+        # # cross_entropy requires shapes (batch_size, vocab_size, seq_len) and (batch_size, seq_len)
+        # loss = F.cross_entropy(logits.transpose(1, 2), labels)
+
+        z_a = encoder_a_out.last_hidden_state
+        z_b = encoder_b_out.last_hidden_state
+
+        l_cycle = 2*F.mse_loss(z_a, z_b) # is equal to F.mse_loss(z_a, z_b) + F.mse_loss(z_b, z_a)
+
+        loss = l_rec + l_cycle
         return loss
 
 
@@ -65,11 +101,15 @@ class SupervisedTranslation(pl.LightningModule):
         return optimizer
 
 
-def get_model_and_tokenizer():
+def get_tokenizer():
     encoder_tokenizer = BertTokenizer.from_pretrained("bert-base-cased")
     decoder_tokenizer = BertTokenizer.from_pretrained("deepset/gbert-base")
+
+    return encoder_tokenizer, decoder_tokenizer
+
+def get_model(vocab_size):
     encoder_config = BertConfig(
-        vocab_size=encoder_tokenizer.vocab_size,
+        vocab_size=vocab_size,
         hidden_size=512,
         num_hidden_layers=6,
         num_attention_heads=8,
@@ -78,7 +118,7 @@ def get_model_and_tokenizer():
     )
 
     decoder_config = BertConfig(
-        vocab_size=decoder_tokenizer.vocab_size,
+        vocab_size=vocab_size,
         hidden_size=512,
         num_hidden_layers=6,
         num_attention_heads=8,
@@ -91,4 +131,4 @@ def get_model_and_tokenizer():
     encoder = BertModel(encoder_config, add_pooling_layer=False)
     decoder = BertLMHeadModel(decoder_config)
     autoencoder = AutoEncoder(encoder, decoder)
-    return autoencoder, encoder_tokenizer, decoder_tokenizer
+    return autoencoder
