@@ -56,6 +56,7 @@ def main(config):
     logger.experiment.config.update(OmegaConf.to_container(config, resolve=True))
 
     trainer = pl.Trainer(
+        accelerator="auto",
         max_steps=config.training.max_steps,
         max_epochs=config.training.max_epochs,
         logger=logger,
