@@ -28,11 +28,20 @@ class AutoEncoder(nn.Module):
 
 
 class UnsupervisedTranslation(pl.LightningModule):
-    def __init__(self, autoencoder_a: AutoEncoder, autoencoder_b: AutoEncoder, lr: float = 1e-4):
+    def __init__(
+        self,
+        autoencoder_a: AutoEncoder,
+        autoencoder_b: AutoEncoder,
+        lr: float = 1e-4,
+        beta_cycle: float = 0.1,
+    ):
         super().__init__()
         self.autoencoder_a = autoencoder_a
         self.autoencoder_b = autoencoder_b
         self.lr = lr
+        self.beta_cycle = beta_cycle
+
+        self.save_hyperparameters(ignore=["autoencoder_a", "autoencoder_b"])
 
     def get_loss(self, batch):
         # tgt_ids = batch["labels"]  # shape: (batch_size, tgt_seq_len + 1)
@@ -86,18 +95,23 @@ class UnsupervisedTranslation(pl.LightningModule):
 
         l_cycle = 2*F.mse_loss(z_a, z_b) # is equal to F.mse_loss(z_a, z_b) + F.mse_loss(z_b, z_a)
 
-        loss = l_rec + l_cycle
-        return loss
+        loss = l_rec + self.beta_cycle*l_cycle
+        return {
+            "loss": loss,
+            "l_rec": l_rec,
+            "l_cycle": l_cycle,
+        }
 
 
     def training_step(self, batch, batch_idx):
-        loss = self.get_loss(batch)
-        # self.log("train", {"loss": loss}, prog_bar=True)
-        return loss
+        metrics = self.get_loss(batch)
+        self.log("train", metrics, prog_bar=True)
+        return metrics
 
     def validation_step(self, batch, batch_idx):
-        loss = self.get_loss(batch)
-        return loss
+        metrics = self.get_loss(batch)
+        self.log("val", metrics, prog_bar=True)
+        return metrics
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), self.lr)

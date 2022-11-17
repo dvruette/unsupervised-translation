@@ -21,6 +21,7 @@ WANDB_API_KEY=<your_api_key>
 - Log into euler through SSH: `ssh <your_nethz>@euler.ethz.ch`
 - (recommended) Add an SSH key for not having to enter your password every time: https://scicomp.ethz.ch/wiki/Accessing_the_cluster#SSH_Keys
   - You can store your SSH key for the current session to not have to enter the SSH-key-password every time: `ssh-add ~/.ssh/<your_ssh_key>`. This needs to be done everytime you restart the computer or change users.
+  - It is also recommended to change the Huggingface cache directory to the scratch storage (available in bulk but gets deleted after ~2 weeks) by adding `HF_HOME=${SCRATCH}/.cache/huggingface` to the `.env` file.
 
 ### Development
 - Developing on Euler is easiest using `code-server`, which is a remotely hosted VSCode instance. To start the server, run `scripts/start_code_server.sh <your_nethz>@euler.ethz.ch`.
