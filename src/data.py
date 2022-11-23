@@ -1,18 +1,20 @@
 import os
 
 from datasets import inspect_dataset, load_dataset_builder, Split, load_dataset
+from datasets.iterable_dataset import IterableDataset
 from transformers import PreTrainedTokenizer
 from hydra.utils import to_absolute_path
 
-def get_dataset(dataset_name: str = "wmt14", language_pair: str = "de-en", stream: bool = True):
+def get_dataset(dataset_name: str = "wmt14", language_pair: str = "de-en", stream: bool = True) -> IterableDataset:
     ds = load_dataset(dataset_name, language_pair, streaming=stream)
     return ds.with_format("torch")
 
 
 class DataCollatorForSupervisedMT:
-    def __init__(self, src_tokenizer: PreTrainedTokenizer, tgt_tokenizer: PreTrainedTokenizer, src_key="de", tgt_key="en"):
+    def __init__(self, src_tokenizer: PreTrainedTokenizer, tgt_tokenizer: PreTrainedTokenizer, max_seq_len=256, src_key="de", tgt_key="en"):
         self.src_tokenizer = src_tokenizer
         self.tgt_tokenizer = tgt_tokenizer
+        self.max_seq_len = max_seq_len
         self.src_key = src_key
         self.tgt_key = tgt_key
 
@@ -21,8 +23,8 @@ class DataCollatorForSupervisedMT:
         src_text = [x[self.src_key] for x in features]
         tgt_text = [x[self.tgt_key] for x in features]
 
-        src_tokens = self.src_tokenizer(src_text, padding=True, max_length=512, truncation=True, return_tensors="pt")
-        tgt_tokens = self.tgt_tokenizer(tgt_text, padding=True, max_length=512, truncation=True, return_tensors="pt")
+        src_tokens = self.src_tokenizer(src_text, padding=True, max_length=self.max_seq_len, truncation=True, return_tensors="pt")
+        tgt_tokens = self.tgt_tokenizer(tgt_text, padding=True, max_length=self.max_seq_len, truncation=True, return_tensors="pt")
         return {
             "input_ids": src_tokens["input_ids"],
             "attention_mask": src_tokens["attention_mask"],

@@ -3,7 +3,9 @@ import os
 from multiprocessing import freeze_support
 
 import hydra
-import pytorch_lightning as pl
+from pytorch_lightning.strategies.ddp import DDPStrategy
+from pytorch_lightning.loggers.wandb import WandbLogger
+from pytorch_lightning import Trainer
 import dotenv
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
@@ -11,7 +13,7 @@ from torch.utils.data import DataLoader
 # add the working directory to $PYTHONPATH
 # needed to make local imports work
 sys.path.append(os.getenv("PWD", "."))
-# load the `.env` file 
+# load the `.env` file
 dotenv.load_dotenv()
 
 from src.supervised.model import get_model_and_tokenizer
@@ -27,15 +29,14 @@ def main(config):
     model = SupervisedTranslation(autoencoder, lr=config.training.learning_rate)
 
     ds = get_dataset()
-    train_ds = ds["train"].shuffle(buffer_size=4*config.training.batch_size)
+    train_ds = ds["train"].shuffle()
     val_ds = ds["validation"]
 
-    collator = DataCollatorForSupervisedMT(src_tokenizer, tgt_tokenizer)
+    collator = DataCollatorForSupervisedMT(src_tokenizer, tgt_tokenizer, max_seq_len=config.training.max_seq_len)
 
     train_dl = DataLoader(
         train_ds,
         batch_size=config.training.batch_size,
-        num_workers=train_ds.n_shards,
         collate_fn=collator,
         shuffle=False,
     )
@@ -43,17 +44,17 @@ def main(config):
     val_dl = DataLoader(
         val_ds,
         batch_size=config.training.batch_size,
-        num_workers=val_ds.n_shards,
         collate_fn=collator,
         shuffle=False,
     )
 
-    logger = pl.loggers.wandb.WandbLogger(entity="getsellerie", project="unsupervised-translation", group="baseline")
+    logger = WandbLogger(entity="getsellerie", project="unsupervised-translation", group="baseline")
     # convert config object to python dict with `OmegaConf.to_container(...)`
     logger.experiment.config.update(OmegaConf.to_container(config, resolve=True))
 
-    trainer = pl.Trainer(
+    trainer = Trainer(
         accelerator="auto",
+        strategy=DDPStrategy(find_unused_parameters=False),
         max_steps=config.training.max_steps,
         max_epochs=config.training.max_epochs,
         logger=logger,
