@@ -1,10 +1,11 @@
 import os
 
 from datasets import inspect_dataset, load_dataset_builder, Split, load_dataset
+from datasets.iterable_dataset import IterableDataset
 from transformers import PreTrainedTokenizer
 from hydra.utils import to_absolute_path
 
-def get_dataset(dataset_name: str = "wmt14", language_pair: str = "de-en", stream: bool = True):
+def get_dataset(dataset_name: str = "wmt14", language_pair: str = "de-en", stream: bool = True) -> IterableDataset:
     ds = load_dataset(dataset_name, language_pair, streaming=stream)
     return ds.with_format("torch")
 
