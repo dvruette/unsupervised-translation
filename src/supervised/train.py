@@ -26,7 +26,7 @@ def main(config):
 
     model = SupervisedTranslation(autoencoder, lr=config.training.learning_rate)
 
-    ds = get_dataset()
+    ds = get_dataset(stream=False)
     train_ds = ds["train"].shuffle()
     val_ds = ds["validation"]
 
