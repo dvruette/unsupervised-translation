@@ -3,6 +3,7 @@ import os
 from multiprocessing import freeze_support
 
 import hydra
+import torch
 import pytorch_lightning as pl
 import dotenv
 from omegaconf import OmegaConf
@@ -14,9 +15,9 @@ sys.path.append(os.getenv("PWD", "."))
 # load the `.env` file 
 dotenv.load_dotenv()
 
-from src.unsupervised.model import get_tokenizer, get_model
+from src.unsupervised.model import get_tokenizers, get_model
 from src.unsupervised.model import UnsupervisedTranslation
-from src.data import get_dataset, DataCollatorForSupervisedMT, DataCollatorForUnsupervisedMT
+from src.data import get_dataset, DataCollatorForUnsupervisedMT
 
 
 
@@ -31,7 +32,7 @@ def main(config):
     logger.experiment.config.update(OmegaConf.to_container(config, resolve=True))
 
     # load model
-    tokenizer_a, tokenizer_b = get_tokenizer()
+    tokenizer_a, tokenizer_b = get_tokenizers()
     autoencoder_a = get_model(tokenizer_a.vocab_size)
     autoencoder_b = get_model(tokenizer_b.vocab_size)
 
@@ -74,7 +75,8 @@ def main(config):
     trainer = pl.Trainer(
         accelerator="auto",
         auto_select_gpus=True,
-        strategy="dp",
+        strategy="dp" if torch.cuda.device_count() > 1 else None,
+        precision=16 if torch.cuda.is_available() else 32,
         max_steps=config.training.max_steps,
         max_epochs=config.training.max_epochs,
         logger=logger,

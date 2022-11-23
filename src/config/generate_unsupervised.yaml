@@ -1,0 +1,3 @@
+model_path: outputs/unsupervised/c903ycn0.ckpt
+max_new_tokens: 64
+max_seq_len: 256
