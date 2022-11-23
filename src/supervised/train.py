@@ -3,8 +3,9 @@ import os
 from multiprocessing import freeze_support
 
 import hydra
-import pytorch_lightning as pl
 from pytorch_lightning.strategies.ddp import DDPStrategy
+from pytorch_lightning.loggers.wandb import WandbLogger
+from pytorch_lightning import Trainer
 import dotenv
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
@@ -47,11 +48,11 @@ def main(config):
         shuffle=False,
     )
 
-    logger = pl.loggers.wandb.WandbLogger(entity="getsellerie", project="unsupervised-translation", group="baseline")
+    logger = WandbLogger(entity="getsellerie", project="unsupervised-translation", group="baseline")
     # convert config object to python dict with `OmegaConf.to_container(...)`
     logger.experiment.config.update(OmegaConf.to_container(config, resolve=True))
 
-    trainer = pl.Trainer(
+    trainer = Trainer(
         accelerator="auto",
         strategy=DDPStrategy(find_unused_parameters=False),
         max_steps=config.training.max_steps,
