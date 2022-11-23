@@ -4,6 +4,7 @@ from multiprocessing import freeze_support
 
 import hydra
 import pytorch_lightning as pl
+from pytorch_lightning.strategies.ddp import DDPStrategy
 import dotenv
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
@@ -52,6 +53,7 @@ def main(config):
 
     trainer = pl.Trainer(
         accelerator="auto",
+        strategy=DDPStrategy(find_unused_parameters=False),
         max_steps=config.training.max_steps,
         max_epochs=config.training.max_epochs,
         logger=logger,
