@@ -11,7 +11,7 @@ from torch.utils.data import DataLoader
 # add the working directory to $PYTHONPATH
 # needed to make local imports work
 sys.path.append(os.getenv("PWD", "."))
-# load the `.env` file 
+# load the `.env` file
 dotenv.load_dotenv()
 
 from src.supervised.model import get_model_and_tokenizer
@@ -27,15 +27,14 @@ def main(config):
     model = SupervisedTranslation(autoencoder, lr=config.training.learning_rate)
 
     ds = get_dataset()
-    train_ds = ds["train"].shuffle(buffer_size=4*config.training.batch_size)
+    train_ds = ds["train"].shuffle()
     val_ds = ds["validation"]
 
-    collator = DataCollatorForSupervisedMT(src_tokenizer, tgt_tokenizer)
+    collator = DataCollatorForSupervisedMT(src_tokenizer, tgt_tokenizer, max_seq_len=config.training.max_seq_len)
 
     train_dl = DataLoader(
         train_ds,
         batch_size=config.training.batch_size,
-        num_workers=train_ds.n_shards,
         collate_fn=collator,
         shuffle=False,
     )
@@ -43,7 +42,6 @@ def main(config):
     val_dl = DataLoader(
         val_ds,
         batch_size=config.training.batch_size,
-        num_workers=val_ds.n_shards,
         collate_fn=collator,
         shuffle=False,
     )
