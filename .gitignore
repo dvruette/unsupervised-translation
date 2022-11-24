@@ -2,7 +2,8 @@ outputs
 wmt*_scripts
 lsf.*
 
-
+# Marvin Stuff
+pyrightconfig.json
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

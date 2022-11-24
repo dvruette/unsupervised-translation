@@ -1,7 +1,22 @@
+hydra:
+  run:
+    dir: ${oc.env:SCRATCH,.}/outputs/supervised/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+data:
+  dataset_name: wmt14
+  language_pair: de-en
+  stream: False
+  train_split: train
+  val_split: validation
+  num_workers: 8
+
 training:
   batch_size: 16
   gradient_accumulation: 2
   max_seq_len: 256
   learning_rate: 0.0001
-  max_steps: 100
-  max_epochs: 1
+  max_steps: 100000
+  max_epochs: 50
+  val:
+    check_interval: 256
+    limit_batches: 128
