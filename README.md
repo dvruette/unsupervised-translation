@@ -28,7 +28,8 @@ WANDB_API_KEY=<your_api_key>
 
 ### Development
 - Developing on Euler is easiest using `code-server`, which is a remotely hosted VSCode instance. To start the server, run `scripts/start_code_server.sh <your_nethz>@euler.ethz.ch`.
-  - If you're starting the server for the first time, you need to manually log into Euler in order to find the code server password.
+  - If you're starting the server for the first time, you need to manually log into Euler in order to find the code server password: `cat ~/.config/code-server/config.yaml`
+  - You might need to switch to the "new" software stack by running `set_software_stack.sh new` and relogging.
   - If your connection is interrupted, so is the connection to the VSCode server. To avoid starting a new job every time, use the dedicated script to reconnect to any running server: `scripts/reconnect_code_server.sh <your_nethz>@euler.ethz.ch`
 
 ### Submitting Runs
