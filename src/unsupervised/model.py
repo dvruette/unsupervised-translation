@@ -82,6 +82,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         self,
         vocab_size_a: int,
         vocab_size_b: int,
+        use_oracle: bool = False,
         num_encoder_layers: int = 6,
         num_decoder_layers: int = 6,
         pooling: Literal["mean", "max"] = "max",
@@ -96,6 +97,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         super().__init__()
         self.vocab_size_a = vocab_size_a
         self.vocab_size_b = vocab_size_b
+        self.use_oracle = use_oracle
         self.pooling = pooling
         self.latent_regularizer = latent_regularizer
         self.n_codes = n_codes
@@ -174,12 +176,41 @@ class UnsupervisedTranslation(pl.LightningModule):
         logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
         logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
 
+        if not self.use_oracle:
+            # set models to evalution mode
+            self.autoencoder_a.eval()
+            self.autoencoder_b.eval()
+            with torch.no_grad():
+                x_hat_b = self.autoencoder_b.decoder.generate(
+                    input_ids=batch["input_ids"][:,:1],
+                    encoder_hidden_states=z_a,
+                    max_new_tokens=128,
+                )
+                x_hat_a = self.autoencoder_a.decoder.generate(
+                    input_ids=batch["labels"][:,:1],
+                    encoder_hidden_states=z_b,
+                    max_new_tokens=128,
+                )
+            # set models back to training mode
+            self.autoencoder_a.train()
+            self.autoencoder_b.train()
+
+            # TODO generate attention mask for generated tokens
+            enc_hat_a = self.encode_a(x_hat_a)
+            enc_hat_b = self.encode_b(x_hat_b)
+            z_hat_a, z_hat_b = enc_hat_a["z"], enc_hat_b["z"]
+
+            # compute cycle consistency loss
+            l_cycle = F.mse_loss(z_a, z_hat_b)+F.mse_loss(z_b, z_hat_a)
+
+        else:
+            # compute cycle consistency loss
+            l_cycle = 2*F.mse_loss(z_a, z_b) # is equal to F.mse_loss(z_a, z_b) + F.mse_loss(z_b, z_a)
+
         # compute reconstruction loss
         l_rec_a = F.cross_entropy(logits_a.transpose(1, 2), batch["input_ids"][:, 1:], ignore_index=0)
         l_rec_b = F.cross_entropy(logits_b.transpose(1, 2), batch["labels"][:, 1:], ignore_index=0)
         l_rec = l_rec_a + l_rec_b
-        # compute cycle consistency loss
-        l_cycle = 2*F.mse_loss(z_a, z_b) # is equal to F.mse_loss(z_a, z_b) + F.mse_loss(z_b, z_a)
         # compute total loss
         loss = l_rec + self.beta_cycle*l_cycle
         # add VQ loss if applicable
