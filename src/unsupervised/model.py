@@ -1,4 +1,4 @@
-from typing import Optional
+from typing import Optional, Literal
 
 import pytorch_lightning as pl
 import torch
@@ -40,43 +40,76 @@ class UnsupervisedTranslation(pl.LightningModule):
         self,
         autoencoder_a: AutoEncoder,
         autoencoder_b: AutoEncoder,
+        pooling: Literal["mean", "max"] = "max",
+        latent_regularizer: Literal["lnorm", "vq", "none"] = "vq",
+        d_model: int = 512,
+        n_codes: int = 1024,
+        n_groups: int = 2,
         lr: float = 1e-4,
         beta_cycle: float = 0.1,
     ):
         super().__init__()
         self.autoencoder_a = autoencoder_a
         self.autoencoder_b = autoencoder_b
+        self.pooling = pooling
+        self.latent_regularizer = latent_regularizer
         self.lr = lr
         self.beta_cycle = beta_cycle
 
+        if self.latent_regularizer == "lnorm":
+            self.lnorm = nn.LayerNorm(d_model)
+        elif self.latent_regularizer == "vq":
+            self.vq_embed = VectorQuantizeEMA(d_model, self.n_codes, self.n_groups)
+        elif self.latent_regularizer != "none":
+            raise ValueError(f"Unknown regularizer: {self.latent_regularizer}")
+
         self.save_hyperparameters(ignore=["autoencoder_a", "autoencoder_b"])
 
-    def get_loss(self, batch):
+    def _encode(self, encoder, *args, **kwargs):
         # get compute hidden states
-        encoder_a_out = self.autoencoder_a.encoder(
-            batch["input_ids"],
-            attention_mask=batch["attention_mask_src"],
-        )
-        encoder_b_out = self.autoencoder_b.encoder(
-            batch["labels"],
-            attention_mask=batch["attention_mask_tgt"],
-        )
+        encoder_out = encoder(*args, **kwargs)
 
         # pool hidden states to get sentence embeddings
-        z_a = torch.max(encoder_a_out.last_hidden_state, dim=1, keepdim=True)[0]
-        z_b = torch.max(encoder_b_out.last_hidden_state, dim=1, keepdim=True)[0]
+        if self.pooling == "max":
+            z = torch.max(encoder_out.last_hidden_state, dim=1, keepdim=True)[0]
+        elif self.pooling == "mean":
+            z = torch.mean(encoder_out.last_hidden_state, dim=1, keepdim=True)[0]
+        else:
+            raise ValueError(f"Unknown pooling: {self.pooling}")
 
-        # get decoder outputs
-        decoder_a_out = self.autoencoder_a.decoder(
-            batch["input_ids"][:, :-1],
-            encoder_hidden_states=z_a,
-        )
-        decoder_b_out = self.autoencoder_b.decoder(
-            batch["labels"][:, :-1],
-            encoder_hidden_states=z_b,
-        )
-        logits_a = decoder_a_out.logits
-        logits_b = decoder_b_out.logits
+        if self.latent_regularizer == "lnorm":
+            # normalize sentence embeddings
+            z = self.lnorm(z)
+        elif self.latent_regularizer == "vq":
+            # vector-quantize embeddings
+            vq_z = self.vq_embed(z)
+            self.log("entropy", vq_z["entropy"])
+            self.log("usage", vq_z["avg_usage"])
+            z = vq_z["z"]
+        return z
+
+    def _decode(self, decoder, input_ids, z, **kwargs):
+        decoder_out = decoder(input_ids, encoder_hidden_states=z_a, **kwargs)
+        return decoder_out.logits
+
+    def encode_a(self, *args, **kwargs):
+        return self._encode(self.autoencoder_a.encoder, *args, **kwargs)
+
+    def encode_b(self, *args, **kwargs):
+        return self._encode(self.autoencoder_b.encoder, *args, **kwargs)
+
+    def decode_a(self, *args, **kwargs):
+        return self._decode(self.autoencoder_a.decoder, *args, **kwargs)
+
+    def decode_b(self, *args, **kwargs):
+        return self._decode(self.autoencoder_b.decoder, *args, **kwargs)
+
+    def get_loss(self, batch):
+        z_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
+        z_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
+
+        logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
+        logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
 
         # compute reconstruction loss
         l_rec_a = F.cross_entropy(logits_a.transpose(1, 2), batch["input_ids"][:, 1:], ignore_index=0)
