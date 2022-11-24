@@ -37,6 +37,9 @@ def main(config):
     model = UnsupervisedTranslation(
         tokenizer_a.vocab_size,
         tokenizer_b.vocab_size,
+        latent_regularizer=config.model.latent_regularizer,
+        n_codes=config.model.vq.n_codes,
+        n_groups=config.model.vq.n_groups,
         lr=config.training.learning_rate
     )
 
