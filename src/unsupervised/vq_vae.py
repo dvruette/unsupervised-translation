@@ -1,3 +1,8 @@
+import numpy as np
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
 # Implementation adapted from https://github.com/rosinality/vq-vae-2-pytorch/blob/master/vqvae.py
 # Random restarts adapted from https://github.com/openai/jukebox/blob/master/jukebox/vqvae/bottleneck.py
 class VectorQuantizeEMA(nn.Module):

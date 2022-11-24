@@ -15,7 +15,7 @@ sys.path.append(os.getenv("PWD", "."))
 # load the `.env` file
 dotenv.load_dotenv()
 
-from src.unsupervised.model import get_tokenizers, get_model
+from src.unsupervised.model import get_tokenizers
 from src.unsupervised.model import UnsupervisedTranslation
 from src.data import get_dataset, DataCollatorForUnsupervisedMT
 
@@ -33,10 +33,12 @@ def main(config):
 
     # load model
     tokenizer_a, tokenizer_b = get_tokenizers()
-    autoencoder_a = get_model(tokenizer_a.vocab_size)
-    autoencoder_b = get_model(tokenizer_b.vocab_size)
 
-    model = UnsupervisedTranslation(autoencoder_a, autoencoder_b, lr=config.training.learning_rate)
+    model = UnsupervisedTranslation(
+        tokenizer_a.vocab_size,
+        tokenizer_b.vocab_size,
+        lr=config.training.learning_rate
+    )
 
     ds = get_dataset(
         dataset_name=config.data.dataset_name,
@@ -46,28 +48,20 @@ def main(config):
     train_ds = ds[config.data.train_split]
     val_ds = ds[config.data.val_split]
 
-    if isinstance(train_ds, IterableDataset):
-        train_ds = train_ds.shuffle(buffer_size=4*config.training.batch_size)
-        shuffle = False
-        num_workers = train_ds.n_shards
-    else:
-        shuffle = True
-        num_workers = config.data.num_workers
-
     collator = DataCollatorForUnsupervisedMT(tokenizer_a, tokenizer_b, max_seq_len=config.training.max_seq_len)
 
     train_dl = DataLoader(
         train_ds,
         batch_size=config.training.batch_size,
-        num_workers=num_workers,
+        num_workers=config.data.num_workers,
         collate_fn=collator,
-        shuffle=shuffle,
+        shuffle=True,
     )
 
     val_dl = DataLoader(
         val_ds,
         batch_size=config.training.batch_size,
-        num_workers=num_workers,
+        num_workers=config.data.num_workers,
         collate_fn=collator,
         shuffle=False,
     )

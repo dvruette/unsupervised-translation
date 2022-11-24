@@ -6,6 +6,9 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import BertConfig, BertModel, BertLMHeadModel, BertTokenizer
 
+from src.unsupervised.vq_vae import VectorQuantizeEMA
+
+
 class CustomBertLMHeadModel(BertLMHeadModel):
     def prepare_inputs_for_generation(self, *args, encoder_hidden_states=None, **kwargs):
         inputs = super().prepare_inputs_for_generation(*args, **kwargs)
@@ -34,12 +37,50 @@ class AutoEncoder(nn.Module):
             encoder_attention_mask=attention_mask,
         )
 
+def get_tokenizers(path_a="bert-base-cased", path_b="deepset/gbert-base"):
+    tokenizer_a = BertTokenizer.from_pretrained(path_a)
+    tokenizer_b = BertTokenizer.from_pretrained(path_b)
+
+    return tokenizer_a, tokenizer_b
+
+def build_autoencoder(
+    vocab_size: int,
+    hidden_size: int = 512,
+    num_hidden_layers: int = 6,
+    num_attention_heads: int = 8,
+    intermediate_size: int = 2048,
+    max_position_embeddings: int = 512,
+):
+    encoder_config = BertConfig(
+        vocab_size=vocab_size,
+        hidden_size=hidden_size,
+        num_hidden_layers=num_hidden_layers,
+        num_attention_heads=num_attention_heads,
+        intermediate_size=intermediate_size,
+        max_position_embeddings=max_position_embeddings,
+    )
+
+    decoder_config = BertConfig(
+        vocab_size=vocab_size,
+        hidden_size=hidden_size,
+        num_hidden_layers=num_hidden_layers,
+        num_attention_heads=num_attention_heads,
+        intermediate_size=intermediate_size,
+        max_position_embeddings=max_position_embeddings,
+    )
+    decoder_config.is_decoder = True
+    decoder_config.add_cross_attention = True
+
+    encoder = BertModel(encoder_config, add_pooling_layer=False)
+    decoder = CustomBertLMHeadModel(decoder_config)
+    autoencoder = AutoEncoder(encoder, decoder)
+    return autoencoder
 
 class UnsupervisedTranslation(pl.LightningModule):
     def __init__(
         self,
-        autoencoder_a: AutoEncoder,
-        autoencoder_b: AutoEncoder,
+        vocab_size_a: int,
+        vocab_size_b: int,
         pooling: Literal["mean", "max"] = "max",
         latent_regularizer: Literal["lnorm", "vq", "none"] = "vq",
         d_model: int = 512,
@@ -49,12 +90,18 @@ class UnsupervisedTranslation(pl.LightningModule):
         beta_cycle: float = 0.1,
     ):
         super().__init__()
-        self.autoencoder_a = autoencoder_a
-        self.autoencoder_b = autoencoder_b
+        self.vocab_size_a = vocab_size_a
+        self.vocab_size_b = vocab_size_b
         self.pooling = pooling
         self.latent_regularizer = latent_regularizer
+        self.n_codes = n_codes
+        self.n_groups = n_groups
+        self.d_model = d_model
         self.lr = lr
         self.beta_cycle = beta_cycle
+
+        self.autoencoder_a = build_autoencoder(vocab_size_a, hidden_size=self.d_model)
+        self.autoencoder_b = build_autoencoder(vocab_size_b, hidden_size=self.d_model)
 
         if self.latent_regularizer == "lnorm":
             self.lnorm = nn.LayerNorm(d_model)
@@ -63,7 +110,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         elif self.latent_regularizer != "none":
             raise ValueError(f"Unknown regularizer: {self.latent_regularizer}")
 
-        self.save_hyperparameters(ignore=["autoencoder_a", "autoencoder_b"])
+        self.save_hyperparameters()
 
     def _encode(self, encoder, *args, **kwargs):
         # get compute hidden states
@@ -83,13 +130,15 @@ class UnsupervisedTranslation(pl.LightningModule):
         elif self.latent_regularizer == "vq":
             # vector-quantize embeddings
             vq_z = self.vq_embed(z)
-            self.log("entropy", vq_z["entropy"])
-            self.log("usage", vq_z["avg_usage"])
+            if "entropy" in vq_z:
+                self.log("entropy", vq_z["entropy"])
+            if "avg_usage" in vq_z:
+                self.log("avg_usage", vq_z["avg_usage"])
             z = vq_z["z"]
         return z
 
     def _decode(self, decoder, input_ids, z, **kwargs):
-        decoder_out = decoder(input_ids, encoder_hidden_states=z_a, **kwargs)
+        decoder_out = decoder(input_ids, encoder_hidden_states=z, **kwargs)
         return decoder_out.logits
 
     def encode_a(self, *args, **kwargs):
@@ -192,36 +241,3 @@ class UnsupervisedTranslation(pl.LightningModule):
             encoder_attention_mask=attention_mask,
             **kwargs,
         )
-
-
-def get_tokenizers():
-    encoder_tokenizer = BertTokenizer.from_pretrained("bert-base-cased")
-    decoder_tokenizer = BertTokenizer.from_pretrained("deepset/gbert-base")
-
-    return encoder_tokenizer, decoder_tokenizer
-
-def get_model(vocab_size):
-    encoder_config = BertConfig(
-        vocab_size=vocab_size,
-        hidden_size=512,
-        num_hidden_layers=6,
-        num_attention_heads=8,
-        intermediate_size=2048,
-        max_position_embeddings=512,
-    )
-
-    decoder_config = BertConfig(
-        vocab_size=vocab_size,
-        hidden_size=512,
-        num_hidden_layers=6,
-        num_attention_heads=8,
-        intermediate_size=2048,
-        max_position_embeddings=512,
-    )
-    decoder_config.is_decoder = True
-    decoder_config.add_cross_attention = True
-
-    encoder = BertModel(encoder_config, add_pooling_layer=False)
-    decoder = CustomBertLMHeadModel(decoder_config)
-    autoencoder = AutoEncoder(encoder, decoder)
-    return autoencoder
