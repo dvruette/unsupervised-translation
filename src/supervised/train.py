@@ -25,6 +25,11 @@ from src.data import get_dataset, DataCollatorForSupervisedMT
 @hydra.main(config_path="../config", config_name="supervised", version_base="1.1")
 def main(config):
     # load model
+    logger = WandbLogger(entity="getsellerie", project="unsupervised-translation", group="baseline")
+    # convert config object to python dict with `OmegaConf.to_container(...)`
+    logger.experiment.config.update(OmegaConf.to_container(config, resolve=True))
+    
+    
     autoencoder, src_tokenizer, tgt_tokenizer = get_model_and_tokenizer()
 
     model = SupervisedTranslation(autoencoder, lr=config.training.learning_rate)
@@ -35,7 +40,7 @@ def main(config):
         stream=config.data.stream,
     )
 
-    train_ds = ds["train"].shuffle()
+    train_ds = ds["train"]
     val_ds = ds["validation"]
 
     collator = DataCollatorForSupervisedMT(src_tokenizer, tgt_tokenizer, max_seq_len=config.training.max_seq_len)
@@ -44,7 +49,8 @@ def main(config):
         train_ds,
         batch_size=config.training.batch_size,
         collate_fn=collator,
-        shuffle=False,
+        shuffle=True,
+        num_workers=4
     )
 
     val_dl = DataLoader(
@@ -52,17 +58,14 @@ def main(config):
         batch_size=config.training.batch_size,
         collate_fn=collator,
         shuffle=False,
+        num_workers=4
     )
-
-    logger = WandbLogger(entity="getsellerie", project="unsupervised-translation", group="baseline")
-    # convert config object to python dict with `OmegaConf.to_container(...)`
-    logger.experiment.config.update(OmegaConf.to_container(config, resolve=True))
 
     trainer = Trainer(
         accelerator="auto",
         auto_select_gpus=True,
         accumulate_grad_batches=config.training.gradient_accumulation,
-        strategy=DDPStrategy(find_unused_parameters=False) if torch.cuda.device_count() > 1 else None,
+        strategy="dp" if torch.cuda.device_count() > 1 else None,
         precision=16 if torch.cuda.is_available() else 32,
         max_steps=config.training.max_steps,
         max_epochs=config.training.max_epochs,
