@@ -10,6 +10,8 @@ data:
   num_workers: 8
 model:
   latent_regularizer: lnorm+vq
+  num_encoder_layers: 6
+  num_decoder_layers: 6
   vq:
     n_codes: 1024
     n_groups: 8

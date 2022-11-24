@@ -46,7 +46,8 @@ def get_tokenizers(path_a="bert-base-cased", path_b="deepset/gbert-base"):
 def build_autoencoder(
     vocab_size: int,
     hidden_size: int = 512,
-    num_hidden_layers: int = 6,
+    num_encoder_layers: int = 6,
+    num_decoder_layers: int = 6,
     num_attention_heads: int = 8,
     intermediate_size: int = 2048,
     max_position_embeddings: int = 512,
@@ -54,7 +55,7 @@ def build_autoencoder(
     encoder_config = BertConfig(
         vocab_size=vocab_size,
         hidden_size=hidden_size,
-        num_hidden_layers=num_hidden_layers,
+        num_hidden_layers=num_encoder_layers,
         num_attention_heads=num_attention_heads,
         intermediate_size=intermediate_size,
         max_position_embeddings=max_position_embeddings,
@@ -63,7 +64,7 @@ def build_autoencoder(
     decoder_config = BertConfig(
         vocab_size=vocab_size,
         hidden_size=hidden_size,
-        num_hidden_layers=num_hidden_layers,
+        num_hidden_layers=num_decoder_layers,
         num_attention_heads=num_attention_heads,
         intermediate_size=intermediate_size,
         max_position_embeddings=max_position_embeddings,
@@ -81,6 +82,8 @@ class UnsupervisedTranslation(pl.LightningModule):
         self,
         vocab_size_a: int,
         vocab_size_b: int,
+        num_encoder_layers: int = 6,
+        num_decoder_layers: int = 6,
         pooling: Literal["mean", "max"] = "max",
         latent_regularizer: Literal["lnorm", "vq", "lnorm+vq", "none"] = "vq",
         d_model: int = 512,
@@ -102,8 +105,18 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.beta_cycle = beta_cycle
         self.beta_vq = beta_vq
 
-        self.autoencoder_a = build_autoencoder(vocab_size_a, hidden_size=self.d_model)
-        self.autoencoder_b = build_autoencoder(vocab_size_b, hidden_size=self.d_model)
+        self.autoencoder_a = build_autoencoder(
+            vocab_size_a,
+            hidden_size=self.d_model,
+            num_encoder_layers=num_encoder_layers,
+            num_decoder_layers=num_decoder_layers,
+        )
+        self.autoencoder_b = build_autoencoder(
+            vocab_size_b,
+            hidden_size=self.d_model,
+            num_encoder_layers=num_encoder_layers,
+            num_decoder_layers=num_decoder_layers,
+        )
 
         if self.latent_regularizer in ["lnorm", "lnorm+vq"]:
             self.lnorm = nn.LayerNorm(d_model)

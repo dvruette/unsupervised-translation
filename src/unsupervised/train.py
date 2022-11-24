@@ -38,6 +38,8 @@ def main(config):
         tokenizer_a.vocab_size,
         tokenizer_b.vocab_size,
         latent_regularizer=config.model.latent_regularizer,
+        num_encoder_layers=config.model.num_encoder_layers,
+        num_decoder_layers=config.model.num_decoder_layers,
         n_codes=config.model.vq.n_codes,
         n_groups=config.model.vq.n_groups,
         lr=config.training.learning_rate
