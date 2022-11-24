@@ -2,6 +2,7 @@ import sys
 import os
 from multiprocessing import freeze_support
 
+import torch
 import hydra
 from pytorch_lightning.strategies.ddp import DDPStrategy
 from pytorch_lightning.loggers.wandb import WandbLogger
@@ -28,7 +29,12 @@ def main(config):
 
     model = SupervisedTranslation(autoencoder, lr=config.training.learning_rate)
 
-    ds = get_dataset(stream=False)
+    ds = get_dataset(
+        dataset_name=config.data.dataset_name,
+        language_pair=config.data.language_pair,
+        stream=config.data.stream,
+    )
+
     train_ds = ds["train"].shuffle()
     val_ds = ds["validation"]
 
@@ -54,10 +60,15 @@ def main(config):
 
     trainer = Trainer(
         accelerator="auto",
-        strategy=DDPStrategy(find_unused_parameters=False),
+        auto_select_gpus=True,
+        accumulate_grad_batches=config.training.gradient_accumulation,
+        strategy=DDPStrategy(find_unused_parameters=False) if torch.cuda.device_count() > 1 else None,
+        precision=16 if torch.cuda.is_available() else 32,
         max_steps=config.training.max_steps,
         max_epochs=config.training.max_epochs,
         logger=logger,
+        limit_val_batches=config.training.val.limit_batches,
+        val_check_interval=config.training.val.check_interval,
     )
     trainer.fit(model, train_dl, val_dl)
 

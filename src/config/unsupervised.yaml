@@ -1,6 +1,6 @@
 hydra:
   run:
-    dir: ${oc.env:SCRATCH}/unsupervised-translation/outputs/unsupervised/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${oc.env:SCRATCH,.}/outputs/unsupervised/${now:%Y-%m-%d}/${now:%H-%M-%S}
 data:
   dataset_name: wmt14
   language_pair: de-en
