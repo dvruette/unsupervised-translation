@@ -184,16 +184,17 @@ class UnsupervisedTranslation(pl.LightningModule):
                 x_hat_b = self.autoencoder_b.decoder.generate(
                     input_ids=batch["input_ids"][:,:1],
                     encoder_hidden_states=z_a,
-                    max_new_tokens=128,
+                    max_new_tokens=128-1,
                 )
                 x_hat_a = self.autoencoder_a.decoder.generate(
                     input_ids=batch["labels"][:,:1],
                     encoder_hidden_states=z_b,
-                    max_new_tokens=128,
+                    max_new_tokens=128-1,
                 )
             # set models back to training mode
-            self.autoencoder_a.train()
-            self.autoencoder_b.train()
+            if self.train:
+                self.autoencoder_a.train()
+                self.autoencoder_b.train()
 
             # TODO generate attention mask for generated tokens
             enc_hat_a = self.encode_a(x_hat_a)
