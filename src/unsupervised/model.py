@@ -201,7 +201,6 @@ class UnsupervisedTranslation(pl.LightningModule):
             **metrics,
         }
 
-
     def training_step(self, batch, batch_idx):
         metrics = self.get_loss(batch)
         self.log("train", metrics, prog_bar=False)
@@ -215,6 +214,27 @@ class UnsupervisedTranslation(pl.LightningModule):
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), self.lr)
         return optimizer
+
+    def _translate(
+        self,
+        autoencoder_src: AutoEncoder,
+        autoencoder_tgt: AutoEncoder,
+        input_ids: torch.Tensor,
+        attention_mask: torch.Tensor,
+        decoder_input_ids: Optional[torch.Tensor] = None,
+        **kwargs,
+    ):
+        encoder_hidden_states = autoencoder_src.encoder(
+            input_ids,
+            attention_mask=attention_mask,
+        ).last_hidden_state
+
+        return autoencoder_tgt.decoder.generate(
+            input_ids=decoder_input_ids,
+            encoder_hidden_states=encoder_hidden_states,
+            encoder_attention_mask=attention_mask,
+            **kwargs,
+        )
 
     def translate_from_a_to_b(
         self,
@@ -245,26 +265,5 @@ class UnsupervisedTranslation(pl.LightningModule):
             input_ids,
             attention_mask,
             decoder_input_ids,
-            **kwargs,
-        )
-
-    def _translate(
-        self,
-        autoencoder_src: AutoEncoder,
-        autoencoder_tgt: AutoEncoder,
-        input_ids: torch.Tensor,
-        attention_mask: torch.Tensor,
-        decoder_input_ids: Optional[torch.Tensor] = None,
-        **kwargs,
-    ):
-        encoder_hidden_states = autoencoder_src.encoder(
-            input_ids,
-            attention_mask=attention_mask,
-        ).last_hidden_state
-
-        return autoencoder_tgt.decoder.generate(
-            input_ids=decoder_input_ids,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=attention_mask,
             **kwargs,
         )
