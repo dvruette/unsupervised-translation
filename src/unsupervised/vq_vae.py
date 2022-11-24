@@ -56,8 +56,8 @@ class VectorQuantizeEMA(nn.Module):
 
         return dict(
             z=quantize,
-            diff=diff,
             codes=codes,
+            loss=diff,
             **update_metrics
         )
 

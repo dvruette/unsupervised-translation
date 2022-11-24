@@ -82,12 +82,13 @@ class UnsupervisedTranslation(pl.LightningModule):
         vocab_size_a: int,
         vocab_size_b: int,
         pooling: Literal["mean", "max"] = "max",
-        latent_regularizer: Literal["lnorm", "vq", "none"] = "vq",
+        latent_regularizer: Literal["lnorm", "vq", "lnorm+vq", "none"] = "vq",
         d_model: int = 512,
         n_codes: int = 1024,
         n_groups: int = 2,
         lr: float = 1e-4,
         beta_cycle: float = 0.1,
+        beta_vq: float = 0.1,
     ):
         super().__init__()
         self.vocab_size_a = vocab_size_a
@@ -99,13 +100,14 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.d_model = d_model
         self.lr = lr
         self.beta_cycle = beta_cycle
+        self.beta_vq = beta_vq
 
         self.autoencoder_a = build_autoencoder(vocab_size_a, hidden_size=self.d_model)
         self.autoencoder_b = build_autoencoder(vocab_size_b, hidden_size=self.d_model)
 
-        if self.latent_regularizer == "lnorm":
+        if self.latent_regularizer in ["lnorm", "lnorm+vq"]:
             self.lnorm = nn.LayerNorm(d_model)
-        elif self.latent_regularizer == "vq":
+        elif self.latent_regularizer in ["vq", "lnorm+vq"]:
             self.vq_embed = VectorQuantizeEMA(d_model, self.n_codes, self.n_groups)
         elif self.latent_regularizer != "none":
             raise ValueError(f"Unknown regularizer: {self.latent_regularizer}")
@@ -124,18 +126,16 @@ class UnsupervisedTranslation(pl.LightningModule):
         else:
             raise ValueError(f"Unknown pooling: {self.pooling}")
 
-        if self.latent_regularizer == "lnorm":
+        if self.latent_regularizer in ["lnorm", "lnorm+vq"]:
             # normalize sentence embeddings
             z = self.lnorm(z)
-        elif self.latent_regularizer == "vq":
+
+        if self.latent_regularizer in ["vq", "lnorm+vq"]:
             # vector-quantize embeddings
             vq_z = self.vq_embed(z)
-            if "entropy" in vq_z:
-                self.log("entropy", vq_z["entropy"])
-            if "avg_usage" in vq_z:
-                self.log("avg_usage", vq_z["avg_usage"])
-            z = vq_z["z"]
-        return z
+            return vq_z
+        else:
+            return {"z": z}
 
     def _decode(self, decoder, input_ids, z, **kwargs):
         decoder_out = decoder(input_ids, encoder_hidden_states=z, **kwargs)
@@ -154,8 +154,9 @@ class UnsupervisedTranslation(pl.LightningModule):
         return self._decode(self.autoencoder_b.decoder, *args, **kwargs)
 
     def get_loss(self, batch):
-        z_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
-        z_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
+        enc_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
+        enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
+        z_a, z_b = enc_a["z"], enc_b["z"]
 
         logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
         logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
@@ -163,15 +164,28 @@ class UnsupervisedTranslation(pl.LightningModule):
         # compute reconstruction loss
         l_rec_a = F.cross_entropy(logits_a.transpose(1, 2), batch["input_ids"][:, 1:], ignore_index=0)
         l_rec_b = F.cross_entropy(logits_b.transpose(1, 2), batch["labels"][:, 1:], ignore_index=0)
-        l_rec = l_rec_a + l_rec_b
+        l_rec = (l_rec_a + l_rec_b) / 2
         # compute cycle consistency loss
-        l_cycle = 2*F.mse_loss(z_a, z_b) # is equal to F.mse_loss(z_a, z_b) + F.mse_loss(z_b, z_a)
+        l_cycle = F.mse_loss(z_a, z_b) # is equal to F.mse_loss(z_a, z_b) + F.mse_loss(z_b, z_a)
         # compute total loss
         loss = l_rec + self.beta_cycle*l_cycle
+        # add VQ loss if applicable
+        if "loss" in enc_a:
+            loss += self.beta_vq * (enc_a["loss"] + enc_b["loss"]) / 2
+
+        metrics = {}
+        if "loss" in enc_a:
+            metrics["l_vq"] = (enc_a["loss"] + enc_b["loss"]) / 2
+        if "entropy" in enc_a:
+            metrics["entropy"] = (enc_a["entropy"] + enc_b["entropy"]) / 2
+        if "avg_usage" in enc_a:
+            metrics["avg_usage"] = (enc_a["avg_usage"] + enc_b["avg_usage"]) / 2
+
         return {
             "loss": loss,
             "l_rec": l_rec,
             "l_cycle": l_cycle,
+            **metrics,
         }
 
 
