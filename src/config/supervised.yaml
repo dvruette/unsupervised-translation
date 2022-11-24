@@ -4,4 +4,6 @@ training:
   max_seq_len: 256
   learning_rate: 0.0001
   max_steps: 100
-  max_epochs: 1
+  val:
+    check_interval: 256
+    limit_batches: 128
