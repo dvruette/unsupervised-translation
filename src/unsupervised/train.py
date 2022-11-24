@@ -76,10 +76,11 @@ def main(config):
         accelerator="auto",
         auto_select_gpus=True,
         strategy="dp" if torch.cuda.device_count() > 1 else None,
-        precision=16 if torch.cuda.is_available() else 32,
+        # precision=16 if torch.cuda.is_available() else 32,
         max_steps=config.training.max_steps,
         max_epochs=config.training.max_epochs,
         logger=logger,
+        accumulate_grad_batches=config.training.accumulate_batches,
         limit_val_batches=config.training.val.limit_batches,
         val_check_interval=config.training.val.check_interval,
     )

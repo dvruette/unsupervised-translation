@@ -9,7 +9,8 @@ data:
   val_split: validation
   num_workers: 8
 training:
-  batch_size: 16
+  batch_size: 8
+  accumulate_batches: 2
   learning_rate: 0.0001
   max_steps: 100000
   max_epochs: 50
