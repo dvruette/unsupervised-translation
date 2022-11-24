@@ -177,14 +177,14 @@ class UnsupervisedTranslation(pl.LightningModule):
         # compute reconstruction loss
         l_rec_a = F.cross_entropy(logits_a.transpose(1, 2), batch["input_ids"][:, 1:], ignore_index=0)
         l_rec_b = F.cross_entropy(logits_b.transpose(1, 2), batch["labels"][:, 1:], ignore_index=0)
-        l_rec = (l_rec_a + l_rec_b) / 2
+        l_rec = l_rec_a + l_rec_b
         # compute cycle consistency loss
-        l_cycle = F.mse_loss(z_a, z_b) # is equal to F.mse_loss(z_a, z_b) + F.mse_loss(z_b, z_a)
+        l_cycle = 2*F.mse_loss(z_a, z_b) # is equal to F.mse_loss(z_a, z_b) + F.mse_loss(z_b, z_a)
         # compute total loss
         loss = l_rec + self.beta_cycle*l_cycle
         # add VQ loss if applicable
         if "loss" in enc_a:
-            loss += self.beta_vq * (enc_a["loss"] + enc_b["loss"]) / 2
+            loss += self.beta_vq * (enc_a["loss"] + enc_b["loss"])
 
         metrics = {}
         if "loss" in enc_a:
@@ -196,8 +196,8 @@ class UnsupervisedTranslation(pl.LightningModule):
 
         return {
             "loss": loss,
-            "l_rec": l_rec,
-            "l_cycle": l_cycle,
+            "l_rec": l_rec / 2,
+            "l_cycle": l_cycle / 2,
             **metrics,
         }
 
