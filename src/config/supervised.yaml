@@ -1,3 +1,11 @@
+data:
+  dataset_name: wmt14
+  language_pair: de-en
+  stream: False
+  train_split: train
+  val_split: validation
+  num_workers: 8
+
 training:
   batch_size: 16
   gradient_accumulation: 2
