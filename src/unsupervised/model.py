@@ -85,7 +85,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         num_encoder_layers: int = 6,
         num_decoder_layers: int = 6,
         pooling: Literal["mean", "max"] = "max",
-        latent_regularizer: Literal["lnorm", "vq", "lnorm+vq", "none"] = "vq",
+        latent_regularizer: Literal["lnorm", "vq", "lnorm+vq", "none"] = "lnorm",
         d_model: int = 512,
         n_codes: int = 1024,
         n_groups: int = 2,
@@ -122,7 +122,7 @@ class UnsupervisedTranslation(pl.LightningModule):
             self.lnorm = nn.LayerNorm(d_model)
         if self.latent_regularizer in ["vq", "lnorm+vq"]:
             self.vq_embed = VectorQuantizeEMA(d_model, self.n_codes, self.n_groups)
-        if self.latent_regularizer not in ["lnorm", "lnorm+vq", "none"]:
+        if self.latent_regularizer not in ["lnorm", "vq", "lnorm+vq", "none"]:
             raise ValueError(f"Unknown regularizer: {self.latent_regularizer}")
 
         self.save_hyperparameters()
