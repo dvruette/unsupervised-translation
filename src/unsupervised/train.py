@@ -29,7 +29,7 @@ def main(config):
         group="unsup-oracle"
     )
     # convert config object to python dict with `OmegaConf.to_container(...)`
-    logger.experiment.config.update(OmegaConf.to_container(config, resolve=True))
+    logger.experiment.config.update({"config": OmegaConf.to_container(config, resolve=True)})
 
     # load model
     tokenizer_a, tokenizer_b = get_tokenizers()
@@ -37,6 +37,7 @@ def main(config):
     model = UnsupervisedTranslation(
         tokenizer_a.vocab_size,
         tokenizer_b.vocab_size,
+        use_oracle=config.model.use_oracle,
         latent_regularizer=config.model.latent_regularizer,
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,
