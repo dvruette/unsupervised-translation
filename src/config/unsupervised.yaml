@@ -9,16 +9,15 @@ data:
   val_split: validation
   num_workers: 8
 model:
-  use_oracle: false
-  latent_regularizer: lnorm+vq
-  num_encoder_layers: 6
+  latent_regularizer: lnorm
+  num_encoder_layers: 4
   num_decoder_layers: 6
   vq:
     n_codes: 1024
     n_groups: 8
 training:
-  batch_size: 8
-  accumulate_batches: 2
+  batch_size: 16
+  accumulate_batches: 1
   learning_rate: 0.0001
   max_steps: 100000
   max_epochs: 50
