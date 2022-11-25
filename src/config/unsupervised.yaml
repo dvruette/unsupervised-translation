@@ -9,6 +9,7 @@ data:
   val_split: validation
   num_workers: 8
 model:
+  use_oracle: false
   latent_regularizer: lnorm+vq
   num_encoder_layers: 6
   num_decoder_layers: 6
