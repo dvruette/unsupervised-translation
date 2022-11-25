@@ -192,28 +192,31 @@ class UnsupervisedTranslation(pl.LightningModule):
                     max_new_tokens=128-1,
                 )
             # set models back to training mode
-            if self.train:
+            if self.training:
                 self.autoencoder_a.train()
                 self.autoencoder_b.train()
 
-            # TODO generate attention mask for generated tokens
+            # TODO: generate attention mask for generated tokens
             enc_hat_a = self.encode_a(x_hat_a)
             enc_hat_b = self.encode_b(x_hat_b)
             z_hat_a, z_hat_b = enc_hat_a["z"], enc_hat_b["z"]
 
             # compute cycle consistency loss
-            l_cycle = F.mse_loss(z_a, z_hat_b)+F.mse_loss(z_b, z_hat_a)
+            l_cycle_a = F.mse_loss(z_a, z_hat_b)
+            l_cycle_b = F.mse_loss(z_b, z_hat_a)
 
         else:
             # compute cycle consistency loss
-            l_cycle = 2*F.mse_loss(z_a, z_b) # is equal to F.mse_loss(z_a, z_b) + F.mse_loss(z_b, z_a)
+            l_cycle_a = F.mse_loss(z_a, z_b)
+            l_cycle_b = F.mse_loss(z_a, z_b)
+        l_cycle = l_cycle_a + l_cycle_b
 
         # compute reconstruction loss
         l_rec_a = F.cross_entropy(logits_a.transpose(1, 2), batch["input_ids"][:, 1:], ignore_index=0)
         l_rec_b = F.cross_entropy(logits_b.transpose(1, 2), batch["labels"][:, 1:], ignore_index=0)
         l_rec = l_rec_a + l_rec_b
         # compute total loss
-        loss = l_rec + self.beta_cycle*l_cycle
+        loss = l_rec + self.beta_cycle * l_cycle
         # add VQ loss if applicable
         if "loss" in enc_a:
             loss += self.beta_vq * (enc_a["loss"] + enc_b["loss"])
@@ -229,7 +232,11 @@ class UnsupervisedTranslation(pl.LightningModule):
         return {
             "loss": loss,
             "l_rec": l_rec / 2,
+            "l_rec_a": l_rec_a,
+            "l_rec_b": l_rec_b,
             "l_cycle": l_cycle / 2,
+            "l_cycle_a": l_cycle_a,
+            "l_cycle_b": l_cycle_b,
             **metrics,
         }
 
@@ -260,11 +267,12 @@ class UnsupervisedTranslation(pl.LightningModule):
             input_ids,
             attention_mask=attention_mask,
         ).last_hidden_state
+        enc = self._encode(autoencoder_src.encoder, input_ids, attention_mask)
+        z = enc["z"]
 
         return autoencoder_tgt.decoder.generate(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=encoder_hidden_states,
-            encoder_attention_mask=attention_mask,
+            encoder_hidden_states=z,
             **kwargs,
         )
 

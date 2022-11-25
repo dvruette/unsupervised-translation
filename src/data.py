@@ -2,7 +2,7 @@ from datasets import load_dataset
 from datasets.iterable_dataset import IterableDataset
 from transformers import PreTrainedTokenizer
 
-def get_dataset(dataset_name: str = "wmt14", language_pair: str = "de-en", stream: bool = True) -> IterableDataset:
+def get_dataset(dataset_name: str = "wmt14", language_pair: str = "de-en", stream: bool = False) -> IterableDataset:
     ds = load_dataset(dataset_name, language_pair, streaming=stream)
     return ds.with_format("torch")
 
