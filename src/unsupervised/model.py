@@ -155,7 +155,7 @@ class UnsupervisedTranslation(pl.LightningModule):
 
         self.lnorm = nn.LayerNorm(d_model)
 
-        if self.latent_regularizer in ["vq", "lnorm+vq"]:
+        if "vq" in self.latent_regularizer:
             self.vq_embed = VectorQuantizeEMA(d_model, self.n_codes, self.n_groups)
         if self.latent_regularizer not in ["norm", "lnorm", "vq", "norm+vq", "lnorm+vq", "none"]:
             raise ValueError(f"Unknown regularizer: {self.latent_regularizer}")
@@ -189,10 +189,10 @@ class UnsupervisedTranslation(pl.LightningModule):
         # layer norm
         z = self.lnorm(z)
 
-        if self.latent_regularizer in ["norm", "norm+vq"]:
+        if "norm" in self.latent_regularizer:
             z = F.normalize(z, dim=-1)
 
-        if self.latent_regularizer in ["vq", "norm+vq", "lnorm+vq"]:
+        if "vq" in self.latent_regularizer:
             # vector-quantize embeddings
             vq_z = self.vq_embed(z)
             return vq_z
