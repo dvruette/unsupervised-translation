@@ -192,7 +192,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         if self.latent_regularizer in ["norm", "norm+vq"]:
             z = F.normalize(z, dim=-1)
 
-        if self.latent_regularizer in ["vq"]:
+        if self.latent_regularizer in ["vq", "norm+vq", "lnorm+vq"]:
             # vector-quantize embeddings
             vq_z = self.vq_embed(z)
             return vq_z
