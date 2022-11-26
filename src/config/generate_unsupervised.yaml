@@ -1,9 +1,10 @@
-model_path: outputs/unsupervised/1bt9fhv9.ckpt
-max_new_tokens: 64
+model_path: outputs/ums9xxkw.ckpt
 max_seq_len: 256
+max_new_tokens: 64
 data:
   dataset_name: wmt14
   language_pair: de-en
-  batch_size: 8
+  batch_size: 4
+  max_batches: 16
   num_workers: 8
   split: validation

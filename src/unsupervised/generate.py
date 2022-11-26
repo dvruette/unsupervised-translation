@@ -6,6 +6,7 @@ import hydra
 import dotenv
 import evaluate
 import numpy as np
+import pandas as pd
 import torch
 import torch.nn.functional as F
 import tqdm
@@ -38,8 +39,6 @@ def main(config):
     tokenizer_a, tokenizer_b = get_tokenizers()
     model = UnsupervisedTranslation.load_from_checkpoint(
         to_absolute_path(config.model_path),
-        vocab_size_a=tokenizer_a.vocab_size,
-        vocab_size_b=tokenizer_b.vocab_size,
     )
 
     bleu = evaluate.load("bleu")
@@ -66,10 +65,12 @@ def main(config):
     ppls_b_to_a = []
     losses_b_to_a = []
 
+    metrics = []
+
     model.eval()
     model.to(device)
-    with torch.no_grad():
-        max_batches = 16
+    with torch.inference_mode():
+        max_batches = config.data.max_batches
         for i, batch in enumerate(tqdm.tqdm(dl, desc="Generating translations", total=min(max_batches, len(dl)))):
             if i == max_batches:
                 break
@@ -84,47 +85,56 @@ def main(config):
             input_ids_b = tokens_b["input_ids"].to(device)
             attention_mask_b = tokens_b["attention_mask"].to(device)
 
+            batch = {
+                "input_ids": input_ids_a,
+                "labels": input_ids_b,
+                "attention_mask_src": attention_mask_a,
+                "attention_mask_tgt": attention_mask_b,
+            }
+            ms = model.get_loss(batch)
+            metrics.append(ms)
+
             # generate translations
-            pred_tokens = model.translate_from_a_to_b(
+            pred_tokens_ab = model.translate_from_a_to_b(
                 input_ids=input_ids_a,
                 attention_mask=attention_mask_a,
                 decoder_input_ids=input_ids_b[:, :1],
                 max_new_tokens=config.max_new_tokens,
                 eos_token_id=tokenizer_b.eos_token_id,
             )
-            translation = tokenizer_b.batch_decode(pred_tokens, skip_special_tokens=True)
-            for x, y, t in zip(xs, ys, translation):
+            translation_ab = tokenizer_b.batch_decode(pred_tokens_ab, skip_special_tokens=True)
+            for x, y, t in zip(xs, ys, translation_ab):
                 translations_a_to_b.append({"src": x, "ref": y, "pred": t})
 
-            pred_tokens = model.translate_from_b_to_a(
+            pred_tokens_ba = model.translate_from_b_to_a(
                 input_ids=input_ids_b,
                 attention_mask=attention_mask_b,
                 decoder_input_ids=input_ids_a[:, :1],
                 max_new_tokens=config.max_new_tokens,
                 eos_token_id=tokenizer_a.eos_token_id,
             )
-            translation = tokenizer_a.batch_decode(pred_tokens, skip_special_tokens=True)
-            for x, y, t in zip(xs, ys, translation):
-                translations_b_to_a.append({"src": x, "ref": y, "pred": t})
+            translation_ba = tokenizer_a.batch_decode(pred_tokens_ba, skip_special_tokens=True)
+            for x, y, t in zip(xs, ys, translation_ba):
+                translations_b_to_a.append({"src": y, "ref": x, "pred": t})
 
             # compute perplexity
-            enc = model.encode_a(
+            enc_a = model.encode_a(
                 input_ids=input_ids_a,
                 attention_mask=attention_mask_a,
             )
-            logits = model.decode_b(input_ids_b[:, :-1], enc["z"])
-            ppl, loss = compute_ppl(logits, input_ids_b, pad_id=tokenizer_b.pad_token_id)
-            ppls_a_to_b.extend(ppl)
-            losses_a_to_b.extend(loss)
+            logits_ab = model.decode_b(input_ids_b[:, :-1], enc_a["z"])
+            ppl_ab, loss_ab = compute_ppl(logits_ab, input_ids_b, pad_id=tokenizer_b.pad_token_id)
+            ppls_a_to_b.extend(ppl_ab)
+            losses_a_to_b.extend(loss_ab)
 
-            enc = model.encode_b(
+            enc_b = model.encode_b(
                 input_ids=input_ids_b,
                 attention_mask=attention_mask_b,
             )
-            logits = model.decode_a(input_ids_a[:, :-1], enc["z"])
-            ppl, loss = compute_ppl(logits, input_ids_a, pad_id=tokenizer_a.pad_token_id)
-            ppls_b_to_a.extend(ppl)
-            losses_b_to_a.extend(loss)
+            logits_ba = model.decode_a(input_ids_a[:, :-1], enc_b["z"])
+            ppl_ba, loss_ba = compute_ppl(logits_ba, input_ids_a, pad_id=tokenizer_a.pad_token_id)
+            ppls_b_to_a.extend(ppl_ba)
+            losses_b_to_a.extend(loss_ba)
 
 
     predictions = [t["pred"] for t in translations_a_to_b]
@@ -132,6 +142,9 @@ def main(config):
     scores = bleu.compute(predictions=predictions, references=references)
 
     # print metrics
+    print("Metrics:")
+    print(pd.DataFrame(metrics).mean())
+
     print("BLEU (a -> b): ", scores["bleu"])
     print("PPL (a -> b): ", np.mean(ppls_a_to_b))
     print("Loss (a -> b): ", np.mean(losses_a_to_b))
@@ -144,12 +157,12 @@ def main(config):
     print("PPL (b -> a): ", np.mean(ppls_b_to_a))
     print("Loss (b -> a): ", np.mean(losses_b_to_a))
 
-
+    print(f"Saving translations to {os.getcwd()}")
     with open("translations_a_to_b.json", "w") as f:
-        json.dump(translations_a_to_b, f)
+        json.dump(translations_a_to_b, f, ensure_ascii=False, indent=2)
 
     with open("translations_b_to_a.json", "w") as f:
-        json.dump(translations_b_to_a, f)
+        json.dump(translations_b_to_a, f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":
