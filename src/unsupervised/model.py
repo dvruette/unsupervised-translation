@@ -321,13 +321,13 @@ class UnsupervisedTranslation(pl.LightningModule):
             # linear warmup with constant learning rate
             scheduler = torch.optim.lr_scheduler.LambdaLR(
                 optimizer,
-                lambda t: min(1.0, (t+1) / self.lr_warmup_steps),
+                lambda t: min(1.0, (t+1) / max(1, self.lr_warmup_steps)),
             )
         elif self.lr_schedule == "cosine":
             # linear warmup with cosine decay to 0.1 * lr
             scheduler = torch.optim.lr_scheduler.LambdaLR(
                 optimizer,
-                lambda t: min(1, ((t+1) / self.lr_warmup_steps)) * (0.9 * (1 + math.cos(math.pi * t / self.lr_max_steps))/2 + 0.1),
+                lambda t: min(1, ((t+1) / max(1, self.lr_warmup_steps))) * (0.9 * (1 + math.cos(math.pi * t / self.lr_max_steps))/2 + 0.1),
             )
         else:
             raise ValueError(f"Unknown lr_schedule {self.lr_schedule}")
