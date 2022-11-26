@@ -172,7 +172,7 @@ class UnsupervisedTranslation(pl.LightningModule):
     def _beta_cycle(self, step):
         if self.beta_cycle_warmup_steps == 0:
             return self.beta_cycle
-        return min(1.0, step / self.beta_cycle_warmup_steps) * self.beta_cycle
+        return min(1.0, (step + 1) / self.beta_cycle_warmup_steps) * self.beta_cycle
 
     def _encode(self, encoder, *args, **kwargs):
         # get compute hidden states

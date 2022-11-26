@@ -12,8 +12,8 @@ data:
   num_workers: 8
 model:
   use_oracle: True
-  latent_regularizer: none
-  distance_metric: l2
+  latent_regularizer: norm+vq
+  distance_metric: cosine
   num_encoder_layers: 4
   num_decoder_layers: 6
   vq:
