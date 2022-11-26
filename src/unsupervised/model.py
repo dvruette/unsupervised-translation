@@ -331,7 +331,13 @@ class UnsupervisedTranslation(pl.LightningModule):
             )
         else:
             raise ValueError(f"Unknown lr_schedule {self.lr_schedule}")
-        return [optimizer], [scheduler]
+        return {
+            "optimizer": optimizer,
+            "lr_scheduler": {
+                "scheduler": scheduler,
+                "interval": "step",
+            }
+        }
 
     def _translate(
         self,
