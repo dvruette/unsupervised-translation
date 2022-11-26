@@ -7,7 +7,7 @@ import torch
 import pytorch_lightning as pl
 import dotenv
 from omegaconf import OmegaConf
-from torch.utils.data import DataLoader, IterableDataset
+from torch.utils.data import DataLoader
 
 # add the working directory to $PYTHONPATH
 # needed to make local imports work
@@ -32,18 +32,25 @@ def main(config):
     logger.experiment.config.update({"config": OmegaConf.to_container(config, resolve=True)})
 
     # load model
-    tokenizer_a, tokenizer_b = get_tokenizers()
+    tokenizer_a, tokenizer_b = get_tokenizers(config.data.tokenizer_path_a, config.data.tokenizer_path_b)
 
     model = UnsupervisedTranslation(
-        tokenizer_a.vocab_size,
-        tokenizer_b.vocab_size,
+        tokenizer_path_a=config.data.tokenizer_path_a,
+        tokenizer_path_b=config.data.tokenizer_path_b,
         use_oracle=config.model.use_oracle,
         latent_regularizer=config.model.latent_regularizer,
+        distance_metric=config.model.distance_metric,
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,
         n_codes=config.model.vq.n_codes,
         n_groups=config.model.vq.n_groups,
-        lr=config.training.learning_rate
+        lr=config.training.optimizer.lr,
+        lr_schedule=config.training.optimizer.schedule,
+        lr_warmup_steps=config.training.optimizer.warmup_steps,
+        lr_max_steps=config.training.optimizer.max_steps,
+        beta_cycle=config.training.beta_cycle,
+        beta_vq=config.training.beta_vq,
+        beta_cycle_warmup_steps=config.training.beta_cycle_warmup_steps,
     )
 
     ds = get_dataset(
@@ -72,17 +79,22 @@ def main(config):
         shuffle=False,
     )
 
+    # initialize callbacks: learning rate monitor, model checkpoint
+    lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval="step")
+    callbacks = [lr_monitor]
+
     trainer = pl.Trainer(
         accelerator="auto",
         auto_select_gpus=True,
         strategy="dp" if torch.cuda.device_count() > 1 else None,
-        # precision=16 if torch.cuda.is_available() else 32,
+        callbacks=callbacks,
         max_steps=config.training.max_steps,
         max_epochs=config.training.max_epochs,
         logger=logger,
         accumulate_grad_batches=config.training.accumulate_batches,
         limit_val_batches=config.training.val.limit_batches,
         val_check_interval=config.training.val.check_interval,
+        gradient_clip_val=1.0,
     )
     trainer.fit(model, train_dl, val_dl)
 
