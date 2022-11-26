@@ -44,10 +44,10 @@ class VectorQuantizeEMA(nn.Module):
         _, embed_idx = (-distance).max(1)
         embed_onehot = F.one_hot(embed_idx, self.n_codes).type(x_.dtype)
 
-        quantize = self.embed(embed_idx).view(-1, self.n_groups * self.dim)
+        quantize = self.embed(embed_idx).view(*x.shape[:-1], self.n_groups * self.dim)
         diff = (quantize.detach() - x).pow(2).mean()
         quantize = x + (quantize - x).detach()
-        codes = embed_idx.view(-1, self.n_groups)
+        codes = embed_idx.view(*x.shape[:-1], self.n_groups)
 
         if self.training:
             update_metrics = self._ema_update(x_, embed_onehot, dist=dist)
