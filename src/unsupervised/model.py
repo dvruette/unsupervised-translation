@@ -108,7 +108,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         num_encoder_layers: int = 4,
         num_decoder_layers: int = 6,
         pooling: Literal["mean", "max", "attention"] = "max",
-        n_pools: int = 8,
+        n_pools: int = 1,
         latent_regularizer: Literal["vq", "norm", "norm+vq", "none"] = "none",
         distance_metric: Literal["cosine", "l2"] = "l2",
         d_model: int = 512,
@@ -196,8 +196,8 @@ class UnsupervisedTranslation(pl.LightningModule):
         encoder_out = encoder(*args, **kwargs)
 
         # pool hidden states to get sentence embeddings
-        h = encoder_out["encoder_last_hidden_state"]
-        mask = encoder_out["encoder_attention_mask"]
+        h = encoder_out.last_hidden_state
+        mask = kwargs.get("attention_mask", None)
         z = pooling(h, mask=mask)
 
         # layer norm
@@ -357,12 +357,13 @@ class UnsupervisedTranslation(pl.LightningModule):
         self,
         autoencoder_src: AutoEncoder,
         autoencoder_tgt: AutoEncoder,
+        pooling_src: nn.Module,
         input_ids: torch.Tensor,
         attention_mask: torch.Tensor,
         decoder_input_ids: Optional[torch.Tensor] = None,
         **kwargs,
     ):
-        enc = self._encode(autoencoder_src.encoder, input_ids, attention_mask)
+        enc = self._encode(autoencoder_src.encoder, pooling_src, input_ids, attention_mask)
         z = enc["z"]
 
         return autoencoder_tgt.decoder.generate(
@@ -381,6 +382,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         return self._translate(
             self.autoencoder_a,
             self.autoencoder_b,
+            self.pooling_a,
             input_ids,
             attention_mask,
             decoder_input_ids,
@@ -397,6 +399,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         return self._translate(
             self.autoencoder_b,
             self.autoencoder_a,
+            self.pooling_b,
             input_ids,
             attention_mask,
             decoder_input_ids,

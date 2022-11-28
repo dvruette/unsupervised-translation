@@ -3,6 +3,10 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 class AttentionPooling(nn.Module):
+    """
+    Pools the input sequence to a fixed number of vectors
+    using attention pooling with `n_pools` learned queries.
+    """
     def __init__(self, d_model: int, n_pools: int):
         super().__init__()
         self.d_model = d_model
@@ -11,8 +15,6 @@ class AttentionPooling(nn.Module):
 
     def forward(self, x, mask=None):
         """
-        Pools the input sequence to a fixed number of vectors
-        using attention pooling with `n_pools` learned queries.
         Args:
             x: [batch_size, seq_len, d_model]
             mask: [batch_size, seq_len]
@@ -36,53 +38,23 @@ class AttentionPooling(nn.Module):
 
 class MaxPooling(nn.Module):
     def __init__(self, d_model: int, n_pools: int):
-        super().__init__()
-        if d_model % n_pools != 0:
-            raise ValueError("d_model must be divisible by n_pools")
-
-        self.d_model = d_model
-        self.n_pools = n_pools
-        self.proj = nn.Linear(d_model // n_pools, d_model)
-
-    def forward(self, x, mask=None):
         """
         Slices the input sequence into `n_pools` and
         projects each slice to the same dimension
         before taking the max across the sequence length.
-        Args:
-            x: [batch, seq_len, d_model]
-            mask: [batch, seq_len]
-        Returns:
-            pooled: [batch, n_pools, d_model]
+        If `n_pools` is 1, this behaves like regular max-pooling.
         """
-        # x: [batch, seq_len, d_model]
-        # mask: [batch, seq_len]
-        if mask is not None:
-            x = x.masked_fill(mask.unsqueeze(-1) == 0, -1e9)
-        # x: [batch, seq_len, d_model]
-        x = x.view(x.size(0), x.size(1), self.n_pools, -1)
-        # x: [batch, n_pools, seq_len, n_pools, d_model // n_pools]
-        x, _ = x.max(dim=2)
-        # x: [batch, n_pools, d_model // n_pools]
-        x = self.proj(x)
-        # x: [batch, n_pools, d_model]
-        return x
-
-class MeanPooling(nn.Module):
-    def __init__(self, d_model: int, n_pools: int):
         super().__init__()
         if d_model % n_pools != 0:
             raise ValueError("d_model must be divisible by n_pools")
 
         self.d_model = d_model
         self.n_pools = n_pools
-        self.proj = nn.Linear(d_model // n_pools, d_model)
-    
+        if self.n_pools > 1:
+            self.proj = nn.Linear(d_model // n_pools, d_model)
+
     def forward(self, x, mask=None):
         """
-        Slices the input sequence into `n_pools` and
-        projects each slice to the same dimension
-        before taking the mean across the sequence length.
         Args:
             x: [batch, seq_len, d_model]
             mask: [batch, seq_len]
@@ -91,13 +63,61 @@ class MeanPooling(nn.Module):
         """
         # x: [batch, seq_len, d_model]
         # mask: [batch, seq_len]
-        if mask is not None:
-            x = x.masked_fill(mask.unsqueeze(-1) == 0, 0)
+        if self.n_pools > 1:
+            if mask is not None:
+                x = x.masked_fill(mask.unsqueeze(-1) == 0, -1e9)
+            # x: [batch, seq_len, d_model]
+            x = x.view(x.size(0), x.size(1), self.n_pools, -1)
+            # x: [batch, n_pools, seq_len, n_pools, d_model // n_pools]
+            x, _ = x.max(dim=2)
+            # x: [batch, n_pools, d_model // n_pools]
+            x = self.proj(x)
+            # x: [batch, n_pools, d_model]
+            return x
+        else:
+            return x.max(dim=1, keepdim=True)[0]
+
+class MeanPooling(nn.Module):
+    def __init__(self, d_model: int, n_pools: int):
+        """
+        Slices the input sequence into `n_pools` and
+        projects each slice to the same dimension
+        before taking the mean across the sequence length.
+        If `n_pools` is 1, this behaves like regular mean-pooling.
+        """
+        super().__init__()
+        if d_model % n_pools != 0:
+            raise ValueError("d_model must be divisible by n_pools")
+
+        self.d_model = d_model
+        self.n_pools = n_pools
+        if self.n_pools > 1:
+            self.proj = nn.Linear(d_model // n_pools, d_model)
+    
+    def forward(self, x, mask=None):
+        """
+        Args:
+            x: [batch, seq_len, d_model]
+            mask: [batch, seq_len]
+        Returns:
+            pooled: [batch, n_pools, d_model]
+        """
         # x: [batch, seq_len, d_model]
-        x = x.view(x.size(0), x.size(1), self.n_pools, -1)
-        # x: [batch, n_pools, seq_len, n_pools, d_model // n_pools]
-        x = x.mean(dim=2)
-        # x: [batch, n_pools, d_model // n_pools]
-        x = self.proj(x)
-        # x: [batch, n_pools, d_model]
-        return x
+        # mask: [batch, seq_len]
+        if self.n_pools > 1:
+            if mask is not None:
+                x = x.masked_fill(mask.unsqueeze(-1) == 0, 0)
+            # x: [batch, seq_len, d_model]
+            x = x.view(x.size(0), x.size(1), self.n_pools, -1)
+            # x: [batch, n_pools, seq_len, n_pools, d_model // n_pools]
+            if mask is not None:
+                x = x.sum(dim=2)
+                x = x / mask.unsqueeze(-1).sum(dim=1, keepdim=True)
+            else:
+                x = x.mean(dim=2)
+            # x: [batch, n_pools, d_model // n_pools]
+            x = self.proj(x)
+            # x: [batch, n_pools, d_model]
+            return x
+        else:
+            return x.mean(dim=1, keepdim=True)
