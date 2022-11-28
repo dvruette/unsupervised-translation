@@ -209,9 +209,10 @@ class UnsupervisedTranslation(pl.LightningModule):
         if "vq" in self.latent_regularizer.split("+"):
             # vector-quantize embeddings
             vq_z = self.vq_embed(z)
+            vq_z["z_pre"] = z
             return vq_z
         else:
-            return {"z": z}
+            return {"z_pre": z, "z": z}
 
     def _decode(self, decoder: CustomBertLMHeadModel, input_ids: torch.Tensor, z: torch.Tensor, **kwargs):
         decoder_out = decoder(input_ids, encoder_hidden_states=z, **kwargs)
@@ -233,6 +234,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         enc_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
         enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
         z_a, z_b = enc_a["z"], enc_b["z"]
+        z_pre_a, z_pre_b = enc_a["z_pre"], enc_b["z_pre"]
 
         logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
         logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
@@ -260,16 +262,16 @@ class UnsupervisedTranslation(pl.LightningModule):
             # TODO: generate attention mask for generated tokens
             enc_hat_a = self.encode_a(x_hat_a)
             enc_hat_b = self.encode_b(x_hat_b)
-            z_hat_a, z_hat_b = enc_hat_a["z"], enc_hat_b["z"]
+            z_hat_a, z_hat_b = enc_hat_a["z_pre"], enc_hat_b["z_pre"]
 
             # compute cycle consistency loss
-            l_cycle_a = self.cycle_loss(z_a, z_hat_b)
-            l_cycle_b = self.cycle_loss(z_b, z_hat_a)
+            l_cycle_a = self.cycle_loss(z_pre_a, z_hat_b)
+            l_cycle_b = self.cycle_loss(z_pre_b, z_hat_a)
 
         else:
             # compute cycle consistency loss
-            l_cycle_a = self.cycle_loss(z_a, z_b)
-            l_cycle_b = self.cycle_loss(z_b, z_a)
+            l_cycle_a = self.cycle_loss(z_pre_a, z_pre_b)
+            l_cycle_b = self.cycle_loss(z_pre_b, z_pre_a)
         l_cycle = l_cycle_a + l_cycle_b
 
         # compute reconstruction loss
