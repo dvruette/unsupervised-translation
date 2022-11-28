@@ -32,7 +32,6 @@ def main(config):
     logger.experiment.config.update({"config": OmegaConf.to_container(config, resolve=True)})
 
     # load model
-    tokenizer_a, tokenizer_b = get_tokenizers(config.data.tokenizer_path_a, config.data.tokenizer_path_b)
 
     model = UnsupervisedTranslation(
         tokenizer_path_a=config.data.tokenizer_path_a,
@@ -52,6 +51,7 @@ def main(config):
         beta_vq=config.training.beta_vq,
         beta_cycle_warmup_steps=config.training.beta_cycle_warmup_steps,
     )
+    tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
 
     ds = get_dataset(
         dataset_name=config.data.dataset_name,

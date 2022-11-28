@@ -18,7 +18,7 @@ sys.path.append(os.getenv("PWD", "."))
 # load the `.env` file 
 dotenv.load_dotenv()
 
-from src.unsupervised.model import UnsupervisedTranslation, get_tokenizers
+from src.unsupervised.model import UnsupervisedTranslation
 from src.data import get_dataset
 
 
@@ -36,10 +36,8 @@ def main(config):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     print(f"Using device: {device}")
 
-    tokenizer_a, tokenizer_b = get_tokenizers()
-    model = UnsupervisedTranslation.load_from_checkpoint(
-        to_absolute_path(config.model_path),
-    )
+    model = UnsupervisedTranslation.load_from_checkpoint(to_absolute_path(config.model_path), map_location=device)
+    tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
 
     bleu = evaluate.load("bleu")
 
@@ -67,10 +65,12 @@ def main(config):
 
     metrics = []
 
-    model.eval()
-    model.to(device)
-    with torch.inference_mode():
-        max_batches = config.data.max_batches
+    max_batches = config.data.max_batches
+    if max_batches is None or max_batches <= 0:
+        max_batches = len(dl)
+
+    # model.eval()
+    with torch.no_grad():
         for i, batch in enumerate(tqdm.tqdm(dl, desc="Generating translations", total=min(max_batches, len(dl)))):
             if i == max_batches:
                 break
@@ -139,21 +139,23 @@ def main(config):
 
     predictions = [t["pred"] for t in translations_a_to_b]
     references = [[t["ref"]] for t in translations_a_to_b]
-    scores = bleu.compute(predictions=predictions, references=references)
+    scores_ab = bleu.compute(predictions=predictions, references=references)
+
+    predictions = [t["pred"] for t in translations_b_to_a]
+    references = [[t["ref"]] for t in translations_b_to_a]
+    scores_ba = bleu.compute(predictions=predictions, references=references)
 
     # print metrics
     print("Metrics:")
     print(pd.DataFrame(metrics).mean())
 
-    print("BLEU (a -> b): ", scores["bleu"])
+    print("BLEU (a -> b): ", scores_ab["bleu"])
+    print("Prec. (a -> b): ", scores_ab["precisions"])
     print("PPL (a -> b): ", np.mean(ppls_a_to_b))
     print("Loss (a -> b): ", np.mean(losses_a_to_b))
 
-    predictions = [t["pred"] for t in translations_b_to_a]
-    references = [[t["ref"]] for t in translations_b_to_a]
-    scores = bleu.compute(predictions=predictions, references=references)
-
-    print("BLEU (b -> a): ", scores["bleu"])
+    print("BLEU (b -> a): ", scores_ba["bleu"])
+    print("Prec. (b -> a): ", scores_ba["precisions"])
     print("PPL (b -> a): ", np.mean(ppls_b_to_a))
     print("Loss (b -> a): ", np.mean(losses_b_to_a))
 

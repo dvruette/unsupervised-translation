@@ -1,5 +1,5 @@
-model_path: outputs/ums9xxkw.ckpt
-max_seq_len: 256
+model_path: outputs/1otmd18s.ckpt
+max_seq_len: 128
 max_new_tokens: 64
 data:
   dataset_name: wmt14
