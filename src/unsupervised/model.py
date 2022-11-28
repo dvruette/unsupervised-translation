@@ -8,6 +8,7 @@ import torch.nn.functional as F
 from transformers import BertConfig, BertModel, BertLMHeadModel, BertTokenizer
 
 from src.unsupervised.vq_vae import VectorQuantizeEMA
+from src.unsupervised.pooling import AttentionPooling, MaxPooling, MeanPooling
 
 
 class CustomBertLMHeadModel(BertLMHeadModel):
@@ -103,10 +104,11 @@ class UnsupervisedTranslation(pl.LightningModule):
         self,
         tokenizer_path_a: str = "bert-base-cased",
         tokenizer_path_b: str = "deepset/gbert-base",
-        use_oracle: bool = False,
-        num_encoder_layers: int = 6,
+        use_oracle: bool = True,
+        num_encoder_layers: int = 4,
         num_decoder_layers: int = 6,
-        pooling: Literal["mean", "max"] = "max",
+        pooling: Literal["mean", "max", "attention"] = "max",
+        n_pools: int = 8,
         latent_regularizer: Literal["vq", "norm", "norm+vq", "none"] = "none",
         distance_metric: Literal["cosine", "l2"] = "l2",
         d_model: int = 512,
@@ -121,8 +123,11 @@ class UnsupervisedTranslation(pl.LightningModule):
         lr_max_steps: int = 100000,
     ):
         super().__init__()
+        self.save_hyperparameters()
+
         self.use_oracle = use_oracle
         self.pooling = pooling
+        self.n_pools = n_pools
         self.latent_regularizer = latent_regularizer
         self.distance_metric = distance_metric
         self.n_codes = n_codes
@@ -153,6 +158,19 @@ class UnsupervisedTranslation(pl.LightningModule):
             num_decoder_layers=num_decoder_layers,
         )
 
+        if self.pooling == "attention":
+            self.pooling_a = AttentionPooling(self.d_model, self.n_pools)
+            self.pooling_b = AttentionPooling(self.d_model, self.n_pools)
+        elif self.pooling == "max":
+            self.pooling_a = MaxPooling(self.d_model, self.n_pools)
+            self.pooling_b = MaxPooling(self.d_model, self.n_pools)
+        elif self.pooling == "mean":
+            self.pooling_a = MeanPooling(self.d_model, self.n_pools)
+            self.pooling_b = MeanPooling(self.d_model, self.n_pools)
+        else:
+            raise ValueError(f"Invalid pooling type: {self.pooling}")
+
+
         self.lnorm = nn.LayerNorm(d_model)
 
         if "vq" in self.latent_regularizer:
@@ -167,47 +185,43 @@ class UnsupervisedTranslation(pl.LightningModule):
         else:
             raise ValueError(f"Unknown distance metric: {self.distance_metric}")
 
-        self.save_hyperparameters()
 
     def _beta_cycle(self, step):
         if self.beta_cycle_warmup_steps == 0:
             return self.beta_cycle
         return min(1.0, (step + 1) / self.beta_cycle_warmup_steps) * self.beta_cycle
 
-    def _encode(self, encoder, *args, **kwargs):
+    def _encode(self, encoder: BertModel, pooling: nn.Module, *args, **kwargs):
         # get compute hidden states
         encoder_out = encoder(*args, **kwargs)
 
         # pool hidden states to get sentence embeddings
-        if self.pooling == "max":
-            z = torch.max(encoder_out.last_hidden_state, dim=1, keepdim=True)[0]
-        elif self.pooling == "mean":
-            z = torch.mean(encoder_out.last_hidden_state, dim=1, keepdim=True)[0]
-        else:
-            raise ValueError(f"Unknown pooling: {self.pooling}")
+        h = encoder_out["encoder_last_hidden_state"]
+        mask = encoder_out["encoder_attention_mask"]
+        z = pooling(h, mask=mask)
 
         # layer norm
         z = self.lnorm(z)
 
-        if "norm" in self.latent_regularizer:
+        if "norm" in self.latent_regularizer.split("+"):
             z = F.normalize(z, dim=-1)
 
-        if "vq" in self.latent_regularizer:
+        if "vq" in self.latent_regularizer.split("+"):
             # vector-quantize embeddings
             vq_z = self.vq_embed(z)
             return vq_z
         else:
             return {"z": z}
 
-    def _decode(self, decoder, input_ids, z, **kwargs):
+    def _decode(self, decoder: CustomBertLMHeadModel, input_ids: torch.Tensor, z: torch.Tensor, **kwargs):
         decoder_out = decoder(input_ids, encoder_hidden_states=z, **kwargs)
         return decoder_out.logits
 
     def encode_a(self, *args, **kwargs):
-        return self._encode(self.autoencoder_a.encoder, *args, **kwargs)
+        return self._encode(self.autoencoder_a.encoder, self.pooling_a, *args, **kwargs)
 
     def encode_b(self, *args, **kwargs):
-        return self._encode(self.autoencoder_b.encoder, *args, **kwargs)
+        return self._encode(self.autoencoder_b.encoder, self.pooling_b, *args, **kwargs)
 
     def decode_a(self, *args, **kwargs):
         return self._decode(self.autoencoder_a.decoder, *args, **kwargs)

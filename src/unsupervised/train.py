@@ -37,6 +37,8 @@ def main(config):
         tokenizer_path_a=config.data.tokenizer_path_a,
         tokenizer_path_b=config.data.tokenizer_path_b,
         use_oracle=config.model.use_oracle,
+        pooling=config.model.pooling,
+        n_pools=config.model.n_pools,
         latent_regularizer=config.model.latent_regularizer,
         distance_metric=config.model.distance_metric,
         num_encoder_layers=config.model.num_encoder_layers,
