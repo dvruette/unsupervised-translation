@@ -328,8 +328,6 @@ class UnsupervisedTranslation(pl.LightningModule):
             self.parameters(),
             lr=self.lr,
             weight_decay=0.01,
-            betas=(0.9, 0.95),
-            eps=1e-8,
         )
         if self.lr_schedule == "constant":
             # linear warmup with constant learning rate
