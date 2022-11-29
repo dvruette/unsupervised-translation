@@ -26,10 +26,10 @@ def main(config):
     logger = pl.loggers.wandb.WandbLogger(
         entity="getsellerie",
         project="unsupervised-translation",
-        group="unsup-oracle"
+        group="unsup-oracle",
+        # convert config object to python dict with `OmegaConf.to_container(...)`
+        config={"config": OmegaConf.to_container(config, resolve=True)},
     )
-    # convert config object to python dict with `OmegaConf.to_container(...)`
-    logger.experiment.config.update({"config": OmegaConf.to_container(config, resolve=True)})
 
     # load model
 
@@ -85,10 +85,15 @@ def main(config):
     lr_monitor = pl.callbacks.LearningRateMonitor(logging_interval="step")
     callbacks = [lr_monitor]
 
+    if config.training.strategy == "ddp":
+        strategy = pl.strategies.DDPStrategy(find_unused_parameters=False)
+    else:
+        strategy = config.training.strategy
+
     trainer = pl.Trainer(
         accelerator="auto",
-        auto_select_gpus=True,
-        strategy="dp" if torch.cuda.device_count() > 1 else None,
+        devices=torch.cuda.device_count() if torch.cuda.is_available() else None,
+        strategy=strategy if torch.cuda.device_count() > 1 else None,
         callbacks=callbacks,
         max_steps=config.training.max_steps,
         max_epochs=config.training.max_epochs,
