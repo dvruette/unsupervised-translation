@@ -13,20 +13,21 @@ data:
 model:
   use_oracle: True
   pooling: attention
-  n_pools: 8
+  n_pools: 4
   latent_regularizer: vq
   distance_metric: l2
   num_encoder_layers: 4
   num_decoder_layers: 6
   vq:
-    n_codes: 1024
-    n_groups: 8
+    n_codes: 512
+    n_groups: 16
 training:
   batch_size: 16
   accumulate_batches: 1
-  beta_cycle: 0.1
-  beta_vq: 0.1
-  beta_cycle_warmup_steps: 2000
+  beta_cycle: 0.25
+  beta_vq: 0.25
+  beta_cycle_warmup_steps: 4000
+  beta_vq_warmup_steps: 0
   optimizer:
     lr: 1e-4
     warmup_steps: 0
@@ -35,6 +36,7 @@ training:
   max_steps: 100000
   max_epochs: 50
   max_seq_len: 128
+  strategy: dp
   val:
     check_interval: 256
     limit_batches: 128
