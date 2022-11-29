@@ -116,7 +116,8 @@ class UnsupervisedTranslation(pl.LightningModule):
         n_groups: int = 2,
         beta_cycle: float = 0.1,
         beta_vq: float = 0.1,
-        beta_cycle_warmup_steps: int = 2000,
+        beta_cycle_warmup_steps: int = 1000,
+        beta_vq_warmup_steps: int = 100,
         lr: float = 1e-4,
         lr_schedule: Literal["constant", "cosine"] = "constant",
         lr_warmup_steps: int = 2000,
@@ -136,6 +137,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.beta_cycle = beta_cycle
         self.beta_vq = beta_vq
         self.beta_cycle_warmup_steps = beta_cycle_warmup_steps
+        self.beta_vq_warmup_steps = beta_vq_warmup_steps
         self.lr = lr
         self.lr_schedule = lr_schedule
         self.lr_warmup_steps = lr_warmup_steps
@@ -191,6 +193,11 @@ class UnsupervisedTranslation(pl.LightningModule):
             return self.beta_cycle
         return min(1.0, (step + 1) / self.beta_cycle_warmup_steps) * self.beta_cycle
 
+    def _beta_vq(self, step):
+        if self.beta_vq_warmup_steps == 0:
+            return self.beta_vq
+        return min(1.0, (step + 1) / self.beta_vq_warmup_steps) * self.beta_vq
+
     def _encode(self, encoder: BertModel, pooling: nn.Module, *args, **kwargs):
         # get compute hidden states
         encoder_out = encoder(*args, **kwargs)
@@ -234,7 +241,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         enc_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
         enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
         z_a, z_b = enc_a["z"], enc_b["z"]
-        z_pre_a, z_pre_b = enc_a["z_pre"], enc_b["z_pre"]
+        z_pre_a, z_pre_b = enc_a["z"], enc_b["z"]
 
         logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
         logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
@@ -262,7 +269,7 @@ class UnsupervisedTranslation(pl.LightningModule):
             # TODO: generate attention mask for generated tokens
             enc_hat_a = self.encode_a(x_hat_a)
             enc_hat_b = self.encode_b(x_hat_b)
-            z_hat_a, z_hat_b = enc_hat_a["z_pre"], enc_hat_b["z_pre"]
+            z_hat_a, z_hat_b = enc_hat_a["z"], enc_hat_b["z"]
 
             # compute cycle consistency loss
             l_cycle_a = self.cycle_loss(z_pre_a, z_hat_b)
@@ -282,7 +289,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         loss = l_rec + self._beta_cycle(self.global_step) * l_cycle
         # add VQ loss if applicable
         if "loss" in enc_a:
-            loss += self.beta_vq * (enc_a["loss"] + enc_b["loss"])
+            loss += self._beta_vq(self.global_step) * (enc_a["loss"] + enc_b["loss"])
 
         metrics = {}
         if "loss" in enc_a:
@@ -311,7 +318,7 @@ class UnsupervisedTranslation(pl.LightningModule):
 
     def training_step(self, batch, batch_idx):
         metrics = self.get_loss(batch)
-        self.log("train", metrics, prog_bar=False)
+        self.log("train", metrics, prog_bar=False, sync_dist=True)
         return metrics
 
     def validation_step(self, batch, batch_idx):
@@ -328,7 +335,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         metrics["l_rec_ab"] = l_rec_ab
         metrics["l_rec_ba"] = l_rec_ba
         # log metrics
-        self.log("val", metrics, prog_bar=False)
+        self.log("val", metrics, prog_bar=False, sync_dist=True)
         return metrics
 
     def configure_optimizers(self):
