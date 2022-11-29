@@ -55,11 +55,10 @@ def main(config):
     )
 
     a_key, b_key = config.data.language_pair.split("-")
-    translations_a_to_b = []
+    translations = []
+    reconstructions = []
     ppls_a_to_b = []
     losses_a_to_b = []
-
-    translations_b_to_a = []
     ppls_b_to_a = []
     losses_b_to_a = []
 
@@ -69,7 +68,7 @@ def main(config):
     if max_batches is None or max_batches <= 0:
         max_batches = len(dl)
 
-    # model.eval()
+    model.eval()
     with torch.no_grad():
         for i, batch in enumerate(tqdm.tqdm(dl, desc="Generating translations", total=min(max_batches, len(dl)))):
             if i == max_batches:
@@ -101,10 +100,9 @@ def main(config):
                 decoder_input_ids=input_ids_b[:, :1],
                 max_new_tokens=config.max_new_tokens,
                 eos_token_id=tokenizer_b.eos_token_id,
+                do_sample=True,
             )
             translation_ab = tokenizer_b.batch_decode(pred_tokens_ab, skip_special_tokens=True)
-            for x, y, t in zip(xs, ys, translation_ab):
-                translations_a_to_b.append({"src": x, "ref": y, "pred": t})
 
             pred_tokens_ba = model.translate_from_b_to_a(
                 input_ids=input_ids_b,
@@ -112,59 +110,92 @@ def main(config):
                 decoder_input_ids=input_ids_a[:, :1],
                 max_new_tokens=config.max_new_tokens,
                 eos_token_id=tokenizer_a.eos_token_id,
+                do_sample=True,
             )
             translation_ba = tokenizer_a.batch_decode(pred_tokens_ba, skip_special_tokens=True)
-            for x, y, t in zip(xs, ys, translation_ba):
-                translations_b_to_a.append({"src": y, "ref": x, "pred": t})
+            for x, y, ab, ba in zip(xs, ys, translation_ab, translation_ba):
+                translations.append({"a": y, "b": x, "a_to_b": ab, "b_to_a": ba})
 
-            # compute perplexity
+            # generate reconstructions
             enc_a = model.encode_a(
                 input_ids=input_ids_a,
                 attention_mask=attention_mask_a,
             )
-            logits_ab = model.decode_b(input_ids_b[:, :-1], enc_a["z"])
-            ppl_ab, loss_ab = compute_ppl(logits_ab, input_ids_b, pad_id=tokenizer_b.pad_token_id)
-            ppls_a_to_b.extend(ppl_ab)
-            losses_a_to_b.extend(loss_ab)
+            pred_tokens_a = model.autoencoder_a.decoder.generate(
+                input_ids=input_ids_a[:, :1],
+                encoder_hidden_states=enc_a["z"],
+                max_new_tokens=config.max_new_tokens,
+                eos_token_id=tokenizer_a.eos_token_id,
+            )
+            rec_a = tokenizer_a.batch_decode(pred_tokens_a, skip_special_tokens=True)
 
             enc_b = model.encode_b(
                 input_ids=input_ids_b,
                 attention_mask=attention_mask_b,
             )
+            pred_tokens_b = model.autoencoder_b.decoder.generate(
+                input_ids=input_ids_b[:, :1],
+                encoder_hidden_states=enc_b["z"],
+                max_new_tokens=config.max_new_tokens,
+                eos_token_id=tokenizer_b.eos_token_id,
+            )
+
+            rec_b = tokenizer_b.batch_decode(pred_tokens_b, skip_special_tokens=True)
+            for x, y, a, b in zip(xs, ys, rec_a, rec_b):
+                reconstructions.append({"a": x, "b": y, "rec_a": a, "rec_b": b})
+
+
+            # compute perplexity
+            logits_ab = model.decode_b(input_ids_b[:, :-1], enc_a["z"])
+            ppl_ab, loss_ab = compute_ppl(logits_ab, input_ids_b, pad_id=tokenizer_b.pad_token_id)
+            ppls_a_to_b.extend(ppl_ab)
+            losses_a_to_b.extend(loss_ab)
+
             logits_ba = model.decode_a(input_ids_a[:, :-1], enc_b["z"])
             ppl_ba, loss_ba = compute_ppl(logits_ba, input_ids_a, pad_id=tokenizer_a.pad_token_id)
             ppls_b_to_a.extend(ppl_ba)
             losses_b_to_a.extend(loss_ba)
 
 
-    predictions = [t["pred"] for t in translations_a_to_b]
-    references = [[t["ref"]] for t in translations_a_to_b]
-    scores_ab = bleu.compute(predictions=predictions, references=references)
+    predictions = [t["b"] for t in translations]
+    references = [[t["a_to_b"]] for t in translations]
+    bleu_ab = bleu.compute(predictions=predictions, references=references)
 
-    predictions = [t["pred"] for t in translations_b_to_a]
-    references = [[t["ref"]] for t in translations_b_to_a]
-    scores_ba = bleu.compute(predictions=predictions, references=references)
+    predictions = [t["a"] for t in translations]
+    references = [[t["b_to_a"]] for t in translations]
+    bleu_ba = bleu.compute(predictions=predictions, references=references)
+
+    predictions = [t["a"] for t in reconstructions]
+    references = [[t["rec_a"]] for t in reconstructions]
+    bleu_rec_a = bleu.compute(predictions=predictions, references=references)
+
+    predictions = [t["b"] for t in reconstructions]
+    references = [[t["rec_b"]] for t in reconstructions]
+    bleu_rec_b = bleu.compute(predictions=predictions, references=references)
 
     # print metrics
     print("Metrics:")
     print(pd.DataFrame(metrics).mean())
-
-    print("BLEU (a -> b): ", scores_ab["bleu"])
-    print("Prec. (a -> b): ", scores_ab["precisions"])
+    print("---")
+    print("BLEU (rec. a): ", bleu_rec_a["bleu"])
+    print("BLEU (rec. b): ", bleu_rec_b["bleu"])
+    print("---")
+    print("BLEU (a -> b): ", bleu_ab["bleu"])
+    print("Prec. (a -> b): ", bleu_ab["precisions"])
     print("PPL (a -> b): ", np.mean(ppls_a_to_b))
     print("Loss (a -> b): ", np.mean(losses_a_to_b))
-
-    print("BLEU (b -> a): ", scores_ba["bleu"])
-    print("Prec. (b -> a): ", scores_ba["precisions"])
+    print("---")
+    print("BLEU (b -> a): ", bleu_ba["bleu"])
+    print("Prec. (b -> a): ", bleu_ba["precisions"])
     print("PPL (b -> a): ", np.mean(ppls_b_to_a))
     print("Loss (b -> a): ", np.mean(losses_b_to_a))
 
     print(f"Saving translations to {os.getcwd()}")
-    with open("translations_a_to_b.json", "w") as f:
-        json.dump(translations_a_to_b, f, ensure_ascii=False, indent=2)
+    with open("translations.json", "w") as f:
+        json.dump(translations, f, ensure_ascii=False, indent=2)
 
-    with open("translations_b_to_a.json", "w") as f:
-        json.dump(translations_b_to_a, f, ensure_ascii=False, indent=2)
+    with open("reconstructions.json", "w") as f:
+        json.dump(reconstructions, f, ensure_ascii=False, indent=2)
 
 
 if __name__ == "__main__":

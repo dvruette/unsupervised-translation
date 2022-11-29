@@ -285,10 +285,16 @@ class UnsupervisedTranslation(pl.LightningModule):
         metrics = {}
         if "loss" in enc_a:
             metrics["l_vq"] = (enc_a["loss"] + enc_b["loss"]) / 2
+            metrics["l_vq_a"] = enc_a["loss"]
+            metrics["l_vq_b"] = enc_b["loss"]
         if "entropy" in enc_a:
             metrics["entropy"] = (enc_a["entropy"] + enc_b["entropy"]) / 2
+            metrics["entropy_a"] = enc_a["entropy"]
+            metrics["entropy_b"] = enc_b["entropy"]
         if "avg_usage" in enc_a:
             metrics["avg_usage"] = (enc_a["avg_usage"] + enc_b["avg_usage"]) / 2
+            metrics["avg_usage_a"] = enc_a["avg_usage"]
+            metrics["avg_usage_b"] = enc_b["avg_usage"]
 
         return {
             "loss": loss,
@@ -364,11 +370,9 @@ class UnsupervisedTranslation(pl.LightningModule):
         **kwargs,
     ):
         enc = self._encode(autoencoder_src.encoder, pooling_src, input_ids, attention_mask)
-        z = enc["z"]
-
         return autoencoder_tgt.decoder.generate(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=z,
+            encoder_hidden_states=enc["z"],
             **kwargs,
         )
 
