@@ -6,7 +6,7 @@ import torch.nn.functional as F
 # Implementation adapted from https://github.com/rosinality/vq-vae-2-pytorch/blob/master/vqvae.py
 # Random restarts adapted from https://github.com/openai/jukebox/blob/master/jukebox/vqvae/bottleneck.py
 class VectorQuantizeEMA(nn.Module):
-    def __init__(self, d_latent, n_codes, n_groups=1, decay=0.995, eps=1e-4, restart_threshold=0.99):
+    def __init__(self, d_latent, n_codes, n_groups=1, decay=0.999, eps=1e-4, restart_threshold=0.99):
         assert d_latent // n_groups == d_latent / n_groups, f"Unexpected latent dimension: d_latent={d_latent} must be divisible by n_groups={n_groups}"
 
         super().__init__()

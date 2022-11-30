@@ -111,6 +111,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         n_pools: int = 1,
         latent_regularizer: Literal["vq", "norm", "norm+vq", "none"] = "none",
         distance_metric: Literal["cosine", "l2"] = "l2",
+        use_latent_projection: bool = False,
         d_model: int = 512,
         n_codes: int = 1024,
         n_groups: int = 2,
@@ -131,6 +132,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.n_pools = n_pools
         self.latent_regularizer = latent_regularizer
         self.distance_metric = distance_metric
+        self.use_latent_projection = use_latent_projection
         self.n_codes = n_codes
         self.n_groups = n_groups
         self.d_model = d_model
@@ -174,6 +176,13 @@ class UnsupervisedTranslation(pl.LightningModule):
 
 
         self.lnorm = nn.LayerNorm(d_model)
+
+        if self.use_latent_projection:
+            self.proj_a_to_b = nn.Linear(d_model, d_model)
+            self.proj_b_to_a = nn.Linear(d_model, d_model)
+        else:
+            self.proj_a_to_b = nn.Identity()
+            self.proj_b_to_a = nn.Identity()
 
         if "vq" in self.latent_regularizer:
             self.vq_embed = VectorQuantizeEMA(d_model, self.n_codes, self.n_groups)
@@ -241,10 +250,22 @@ class UnsupervisedTranslation(pl.LightningModule):
         enc_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
         enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
         z_a, z_b = enc_a["z"], enc_b["z"]
-        z_pre_a, z_pre_b = enc_a["z"], enc_b["z"]
+        
+        if self.use_latent_projection:
+            enc_ab = self.vq_embed(self.proj_a_to_b(enc_a["z_pre"]))
+            enc_ba = self.vq_embed(self.proj_b_to_a(enc_b["z_pre"]))
+            z_ab = enc_ab["z"]
+            z_ba = enc_ba["z"]
+        else:
+            z_ab = z_a
+            z_ba = z_b
 
-        logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
-        logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
+        # logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
+        # logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
+
+        # for testing: learn to translate with labels
+        logits_a = self.decode_a(batch["input_ids"][:, :-1], z_b)
+        logits_b = self.decode_b(batch["labels"][:, :-1], z_a)
 
         if not self.use_oracle:
             # set models to evalution mode
@@ -253,12 +274,12 @@ class UnsupervisedTranslation(pl.LightningModule):
             with torch.no_grad():
                 x_hat_b = self.autoencoder_b.decoder.generate(
                     input_ids=batch["input_ids"][:,:1],
-                    encoder_hidden_states=z_a,
+                    encoder_hidden_states=z_ab,
                     max_new_tokens=128-1,
                 )
                 x_hat_a = self.autoencoder_a.decoder.generate(
                     input_ids=batch["labels"][:,:1],
-                    encoder_hidden_states=z_b,
+                    encoder_hidden_states=z_ba,
                     max_new_tokens=128-1,
                 )
             # set models back to training mode
@@ -272,13 +293,13 @@ class UnsupervisedTranslation(pl.LightningModule):
             z_hat_a, z_hat_b = enc_hat_a["z"], enc_hat_b["z"]
 
             # compute cycle consistency loss
-            l_cycle_a = self.cycle_loss(z_pre_a, z_hat_b)
-            l_cycle_b = self.cycle_loss(z_pre_b, z_hat_a)
+            l_cycle_a = self.cycle_loss(z_ab, z_hat_b)
+            l_cycle_b = self.cycle_loss(z_ba, z_hat_a)
 
         else:
             # compute cycle consistency loss
-            l_cycle_a = self.cycle_loss(z_pre_a, z_pre_b)
-            l_cycle_b = self.cycle_loss(z_pre_b, z_pre_a)
+            l_cycle_a = self.cycle_loss(z_ab, z_b)
+            l_cycle_b = self.cycle_loss(z_ba, z_a)
         l_cycle = l_cycle_a + l_cycle_b
 
         # compute reconstruction loss

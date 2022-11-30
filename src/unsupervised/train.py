@@ -26,7 +26,7 @@ def main(config):
     logger = pl.loggers.wandb.WandbLogger(
         entity="getsellerie",
         project="unsupervised-translation",
-        group="unsup-oracle",
+        group=config.group,
         # convert config object to python dict with `OmegaConf.to_container(...)`
         config={"config": OmegaConf.to_container(config, resolve=True)},
     )
@@ -41,6 +41,7 @@ def main(config):
         n_pools=config.model.n_pools,
         latent_regularizer=config.model.latent_regularizer,
         distance_metric=config.model.distance_metric,
+        use_latent_projection=config.model.use_latent_projection,
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,
         n_codes=config.model.vq.n_codes,
@@ -92,7 +93,7 @@ def main(config):
 
     trainer = pl.Trainer(
         accelerator="auto",
-        devices=torch.cuda.device_count() if torch.cuda.is_available() else None,
+        devices=config.training.devices,
         strategy=strategy if torch.cuda.device_count() > 1 else None,
         callbacks=callbacks,
         max_steps=config.training.max_steps,

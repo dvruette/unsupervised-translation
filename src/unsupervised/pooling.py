@@ -68,8 +68,8 @@ class MaxPooling(nn.Module):
                 x = x.masked_fill(mask.unsqueeze(-1) == 0, -1e9)
             # x: [batch, seq_len, d_model]
             x = x.view(x.size(0), x.size(1), self.n_pools, -1)
-            # x: [batch, n_pools, seq_len, n_pools, d_model // n_pools]
-            x, _ = x.max(dim=2)
+            # x: [batch, seq_len, n_pools, d_model // n_pools]
+            x, _ = x.max(dim=1)
             # x: [batch, n_pools, d_model // n_pools]
             x = self.proj(x)
             # x: [batch, n_pools, d_model]
@@ -109,12 +109,12 @@ class MeanPooling(nn.Module):
                 x = x.masked_fill(mask.unsqueeze(-1) == 0, 0)
             # x: [batch, seq_len, d_model]
             x = x.view(x.size(0), x.size(1), self.n_pools, -1)
-            # x: [batch, n_pools, seq_len, n_pools, d_model // n_pools]
+            # x: [batch, seq_len, n_pools, d_model // n_pools]
             if mask is not None:
-                x = x.sum(dim=2)
+                x = x.sum(dim=1)
                 x = x / mask.unsqueeze(-1).sum(dim=1, keepdim=True)
             else:
-                x = x.mean(dim=2)
+                x = x.mean(dim=1)
             # x: [batch, n_pools, d_model // n_pools]
             x = self.proj(x)
             # x: [batch, n_pools, d_model]

@@ -1,6 +1,7 @@
 hydra:
   run:
     dir: ${oc.env:SCRATCH,.}/outputs/unsupervised/${now:%Y-%m-%d}/${now:%H-%M-%S}
+group: supervised-latent
 data:
   dataset_name: wmt14
   language_pair: de-en
@@ -15,18 +16,20 @@ model:
   pooling: attention
   n_pools: 4
   latent_regularizer: vq
+  use_latent_projection: false
   distance_metric: l2
   num_encoder_layers: 4
   num_decoder_layers: 6
   vq:
-    n_codes: 512
-    n_groups: 16
+    n_codes: 1024
+    n_groups: 8
 training:
   batch_size: 16
+  devices: 4
   accumulate_batches: 1
-  beta_cycle: 0.25
-  beta_vq: 0.25
-  beta_cycle_warmup_steps: 4000
+  beta_cycle: 0.1
+  beta_vq: 0.1
+  beta_cycle_warmup_steps: 0
   beta_vq_warmup_steps: 0
   optimizer:
     lr: 1e-4
