@@ -7,14 +7,14 @@ import dotenv
 import evaluate
 from hydra.utils import to_absolute_path
 from transformers import (
-    AutoTokenizer, 
+    AutoTokenizer,
     AutoModelForSeq2SeqLM,
 )
 
 # add the working directory to $PYTHONPATH
 # needed to make local imports work
 sys.path.append(os.getenv("PWD", "."))
-# load the `.env` file 
+# load the `.env` file
 dotenv.load_dotenv()
 
 

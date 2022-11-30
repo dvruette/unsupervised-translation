@@ -15,7 +15,7 @@ from hydra.utils import to_absolute_path
 # add the working directory to $PYTHONPATH
 # needed to make local imports work
 sys.path.append(os.getenv("PWD", "."))
-# load the `.env` file 
+# load the `.env` file
 dotenv.load_dotenv()
 
 from src.unsupervised.model import UnsupervisedTranslation

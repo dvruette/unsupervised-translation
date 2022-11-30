@@ -55,6 +55,7 @@ class AutoEncoder(nn.Module):
 class SupervisedTranslation(pl.LightningModule):
     def __init__(self, autoencoder: AutoEncoder, lr: float = 1e-4):
         super().__init__()
+        self.save_hyperparameters()
         self.autoencoder = autoencoder
         self.lr = lr
 
