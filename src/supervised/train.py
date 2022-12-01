@@ -22,14 +22,14 @@ from src.supervised.model import SupervisedTranslation
 from src.data import get_dataset, DataCollatorForSupervisedMT
 
 
-@hydra.main(config_path="../config", config_name="supervised", version_base="1.1")
+@hydra.main(config_path="../config", config_name="supervised_de-en", version_base="1.1")
 def main(config):
     # load model
     logger = WandbLogger(entity="getsellerie", project="unsupervised-translation", group="baseline")
     # convert config object to python dict with `OmegaConf.to_container(...)`
     logger.experiment.config.update(OmegaConf.to_container(config, resolve=True))
-    
-    
+
+
     autoencoder, src_tokenizer, tgt_tokenizer = get_model_and_tokenizer()
 
     model = SupervisedTranslation(autoencoder, lr=config.training.learning_rate)

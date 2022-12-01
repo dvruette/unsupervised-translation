@@ -288,8 +288,15 @@ class UnsupervisedTranslation(pl.LightningModule):
                 self.autoencoder_b.train()
 
             # TODO: generate attention mask for generated tokens
-            enc_hat_a = self.encode_a(x_hat_a)
-            enc_hat_b = self.encode_b(x_hat_b)
+            sep_a_id = self.tokenizer_a.sep_token_id
+            sep_b_id = self.tokenizer_b.sep_token_id
+            mask_a = (x_hat_a == sep_a_id).long()
+            mask_b = (x_hat_b != sep_b_id).long()
+            attention_mask_a = 1 - mask_a.cumsum(dim=-1) + mask_a
+            attention_mask_b = 1 - mask_b.cumsum(dim=-1) + mask_b
+
+            enc_hat_a = self.encode_a(x_hat_a, attention_mask=attention_mask_a)
+            enc_hat_b = self.encode_b(x_hat_b, attention_mask=attention_mask_b)
             z_hat_a, z_hat_b = enc_hat_a["z"], enc_hat_b["z"]
 
             # compute cycle consistency loss
