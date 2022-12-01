@@ -1,7 +1,8 @@
 from typing import Optional, Literal
 
-import pytorch_lightning as pl
+import evaluate
 import math
+import pytorch_lightning as pl
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -78,6 +79,14 @@ def build_autoencoder(
     decoder = CustomBertLMHeadModel(decoder_config)
     autoencoder = AutoEncoder(encoder, decoder)
     return autoencoder
+
+
+def _bleu_score(tokens, target, tokenizer, bleu=evaluate.load("bleu")):
+    xs = tokenizer.batch_decode(tokens, skip_special_tokens=True)
+    ys = tokenizer.batch_decode(target, skip_special_tokens=True)
+    # nest list to match bleu input format
+    ys = [[y] for y in ys]
+    return bleu.compute(predictions=xs, references=ys)
 
 
 class CosineLoss(nn.Module):
@@ -275,19 +284,23 @@ class UnsupervisedTranslation(pl.LightningModule):
                 x_hat_b = self.autoencoder_b.decoder.generate(
                     input_ids=batch["input_ids"][:,:1],
                     encoder_hidden_states=z_ab,
+                    eos_token_id=self.tokenizer_b.sep_token_id,
                     max_new_tokens=128-1,
+                    num_beams=4,
                 )
                 x_hat_a = self.autoencoder_a.decoder.generate(
                     input_ids=batch["labels"][:,:1],
                     encoder_hidden_states=z_ba,
+                    eos_token_id=self.tokenizer_a.sep_token_id,
                     max_new_tokens=128-1,
+                    num_beams=4,
                 )
             # set models back to training mode
             if self.training:
                 self.autoencoder_a.train()
                 self.autoencoder_b.train()
 
-            # TODO: generate attention mask for generated tokens
+            # generate attention mask for generated tokens
             sep_a_id = self.tokenizer_a.sep_token_id
             sep_b_id = self.tokenizer_b.sep_token_id
             mask_a = (x_hat_a == sep_a_id).long()
@@ -352,7 +365,7 @@ class UnsupervisedTranslation(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         # compute batch metrics
         metrics = self.get_loss(batch)
-        # also compute loss for translations
+        # compute loss for translations
         enc_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
         enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
         z_a, z_b = enc_a["z"], enc_b["z"]
@@ -362,6 +375,29 @@ class UnsupervisedTranslation(pl.LightningModule):
         l_rec_ba = F.cross_entropy(logits_ba.transpose(1, 2), batch["input_ids"][:, 1:], ignore_index=self.tokenizer_a.pad_token_id)
         metrics["l_rec_ab"] = l_rec_ab
         metrics["l_rec_ba"] = l_rec_ba
+        # compute BLEU score
+        if self.global_step > 0:
+            with torch.no_grad():
+                x_hat_b = self.autoencoder_b.decoder.generate(
+                    input_ids=batch["input_ids"][:,:1],
+                    encoder_hidden_states=z_a,
+                    eos_token_id=self.tokenizer_b.sep_token_id,
+                    max_new_tokens=128-1,
+                    num_beams=4,
+                )
+                x_hat_a = self.autoencoder_a.decoder.generate(
+                    input_ids=batch["labels"][:,:1],
+                    encoder_hidden_states=z_b,
+                    eos_token_id=self.tokenizer_a.sep_token_id,
+                    max_new_tokens=128-1,
+                    num_beams=4,
+                )
+                bleu_score_a = _bleu_score(x_hat_a, batch["input_ids"], self.tokenizer_a)
+                bleu_score_b = _bleu_score(x_hat_b, batch["labels"], self.tokenizer_b)
+            metrics["bleu_a"] = bleu_score_a
+            metrics["bleu_b"] = bleu_score_b
+            metrics["bleu"] = (bleu_score_a + bleu_score_b) / 2
+
         # log metrics
         self.log("val", metrics, prog_bar=False, sync_dist=True)
         return metrics
