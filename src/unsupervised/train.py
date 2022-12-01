@@ -93,7 +93,7 @@ def main(config):
 
     trainer = pl.Trainer(
         accelerator="auto",
-        devices=config.training.devices,
+        devices=config.training.devices if torch.cuda.is_available() else None,
         strategy=strategy if torch.cuda.device_count() > 1 else None,
         callbacks=callbacks,
         max_steps=config.training.max_steps,

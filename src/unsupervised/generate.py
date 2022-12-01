@@ -114,7 +114,7 @@ def main(config):
             )
             translation_ba = tokenizer_a.batch_decode(pred_tokens_ba, skip_special_tokens=True)
             for x, y, ab, ba in zip(xs, ys, translation_ab, translation_ba):
-                translations.append({"a": y, "b": x, "a_to_b": ab, "b_to_a": ba})
+                translations.append({"a": x, "b": y, "a_to_b": ab, "b_to_a": ba})
 
             # generate reconstructions
             enc_a = model.encode_a(
