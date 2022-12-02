@@ -81,13 +81,17 @@ def build_autoencoder(
     return autoencoder
 
 
-def _bleu_score(tokens, target, tokenizer, bleu=evaluate.load("bleu")):
+def _bleu_score(tokens, target, tokenizer):
+    bleu = evaluate.load("bleu")
     xs = tokenizer.batch_decode(tokens, skip_special_tokens=True)
     ys = tokenizer.batch_decode(target, skip_special_tokens=True)
-    # nest list to match bleu input format
-    ys = [[y] for y in ys]
-    return bleu.compute(predictions=xs, references=ys)
 
+    filtered = [(x.strip(), y.strip()) for x, y in zip(xs, ys) if x.strip() and y.strip()]
+    if len(filtered) == 0:
+        return {"bleu": 0}
+
+    xs, ys = tuple(zip(*filtered))
+    return bleu.compute(predictions=xs, references=ys)
 
 class CosineLoss(nn.Module):
     def __init__(self, dim=1, reduction="mean", eps=1e-8):
@@ -128,10 +132,13 @@ class UnsupervisedTranslation(pl.LightningModule):
         beta_vq: float = 0.1,
         beta_cycle_warmup_steps: int = 1000,
         beta_vq_warmup_steps: int = 100,
+        num_beams: int = 1,
+        do_sample: bool = True,
         lr: float = 1e-4,
         lr_schedule: Literal["constant", "cosine"] = "constant",
         lr_warmup_steps: int = 2000,
         lr_max_steps: int = 100000,
+        bleu_eval_freq: int = 2048,
     ):
         super().__init__()
         self.save_hyperparameters()
@@ -149,10 +156,13 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.beta_vq = beta_vq
         self.beta_cycle_warmup_steps = beta_cycle_warmup_steps
         self.beta_vq_warmup_steps = beta_vq_warmup_steps
+        self.num_beams = num_beams
+        self.do_sample = do_sample
         self.lr = lr
         self.lr_schedule = lr_schedule
         self.lr_warmup_steps = lr_warmup_steps
         self.lr_max_steps = lr_max_steps
+        self.bleu_eval_freq = bleu_eval_freq
 
         self.tokenizer_a, self.tokenizer_b = get_tokenizers(tokenizer_path_a, tokenizer_path_b)
         self.vocab_size_a = self.tokenizer_a.vocab_size
@@ -204,7 +214,6 @@ class UnsupervisedTranslation(pl.LightningModule):
             self.cycle_loss = nn.MSELoss()
         else:
             raise ValueError(f"Unknown distance metric: {self.distance_metric}")
-
 
     def _beta_cycle(self, step):
         if self.beta_cycle_warmup_steps == 0:
@@ -269,14 +278,20 @@ class UnsupervisedTranslation(pl.LightningModule):
             z_ab = z_a
             z_ba = z_b
 
-        # logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
-        # logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
 
-        # for testing: learn to translate with labels
-        logits_a = self.decode_a(batch["input_ids"][:, :-1], z_b)
-        logits_b = self.decode_b(batch["labels"][:, :-1], z_a)
+        if self.use_oracle:
+            # for testing: learn to translate with labels
+            logits_a = self.decode_a(batch["input_ids"][:, :-1], z_b)
+            logits_b = self.decode_b(batch["labels"][:, :-1], z_a)
+        else:
+            logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
+            logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
 
-        if not self.use_oracle:
+        if self.use_oracle:
+            # compute cycle consistency loss
+            l_cycle_a = self.cycle_loss(z_ab, z_b)
+            l_cycle_b = self.cycle_loss(z_ba, z_a)
+        else:
             # set models to evalution mode
             self.autoencoder_a.eval()
             self.autoencoder_b.eval()
@@ -286,14 +301,16 @@ class UnsupervisedTranslation(pl.LightningModule):
                     encoder_hidden_states=z_ab,
                     eos_token_id=self.tokenizer_b.sep_token_id,
                     max_new_tokens=128-1,
-                    num_beams=4,
+                    num_beams=self.num_beams,
+                    do_sample=self.do_sample,
                 )
                 x_hat_a = self.autoencoder_a.decoder.generate(
                     input_ids=batch["labels"][:,:1],
                     encoder_hidden_states=z_ba,
                     eos_token_id=self.tokenizer_a.sep_token_id,
                     max_new_tokens=128-1,
-                    num_beams=4,
+                    num_beams=self.num_beams,
+                    do_sample=self.do_sample,
                 )
             # set models back to training mode
             if self.training:
@@ -316,10 +333,6 @@ class UnsupervisedTranslation(pl.LightningModule):
             l_cycle_a = self.cycle_loss(z_ab, z_hat_b)
             l_cycle_b = self.cycle_loss(z_ba, z_hat_a)
 
-        else:
-            # compute cycle consistency loss
-            l_cycle_a = self.cycle_loss(z_ab, z_b)
-            l_cycle_b = self.cycle_loss(z_ba, z_a)
         l_cycle = l_cycle_a + l_cycle_b
 
         # compute reconstruction loss
@@ -365,6 +378,7 @@ class UnsupervisedTranslation(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         # compute batch metrics
         metrics = self.get_loss(batch)
+
         # compute loss for translations
         enc_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
         enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
@@ -375,28 +389,40 @@ class UnsupervisedTranslation(pl.LightningModule):
         l_rec_ba = F.cross_entropy(logits_ba.transpose(1, 2), batch["input_ids"][:, 1:], ignore_index=self.tokenizer_a.pad_token_id)
         metrics["l_rec_ab"] = l_rec_ab
         metrics["l_rec_ba"] = l_rec_ba
+
         # compute BLEU score
-        if self.global_step > 0:
+        if (
+            self.global_step % self.bleu_eval_freq == 0
+            and self.global_step > 0
+            and self.global_rank == 0
+            and batch_idx < 16
+        ):
             with torch.no_grad():
+                beam_z_a = z_a.repeat_interleave(4, dim=0)
+                beam_z_b = z_b.repeat_interleave(4, dim=0)
                 x_hat_b = self.autoencoder_b.decoder.generate(
                     input_ids=batch["input_ids"][:,:1],
-                    encoder_hidden_states=z_a,
+                    encoder_hidden_states=beam_z_a,
                     eos_token_id=self.tokenizer_b.sep_token_id,
-                    max_new_tokens=128-1,
+                    max_new_tokens=64,
                     num_beams=4,
                 )
                 x_hat_a = self.autoencoder_a.decoder.generate(
                     input_ids=batch["labels"][:,:1],
-                    encoder_hidden_states=z_b,
+                    encoder_hidden_states=beam_z_b,
                     eos_token_id=self.tokenizer_a.sep_token_id,
-                    max_new_tokens=128-1,
+                    max_new_tokens=64,
                     num_beams=4,
                 )
                 bleu_score_a = _bleu_score(x_hat_a, batch["input_ids"], self.tokenizer_a)
                 bleu_score_b = _bleu_score(x_hat_b, batch["labels"], self.tokenizer_b)
-            metrics["bleu_a"] = bleu_score_a
-            metrics["bleu_b"] = bleu_score_b
-            metrics["bleu"] = (bleu_score_a + bleu_score_b) / 2
+
+                scores = {
+                    "bleu_ba": bleu_score_a["bleu"],
+                    "bleu_ab": bleu_score_b["bleu"],
+                    "bleu": (bleu_score_a["bleu"] + bleu_score_b["bleu"]) / 2,
+                }
+                self.log("eval", scores, prog_bar=True)
 
         # log metrics
         self.log("val", metrics, prog_bar=False, sync_dist=True)
