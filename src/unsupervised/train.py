@@ -53,6 +53,9 @@ def main(config):
         beta_cycle=config.training.beta_cycle,
         beta_vq=config.training.beta_vq,
         beta_cycle_warmup_steps=config.training.beta_cycle_warmup_steps,
+        beta_vq_warmup_steps=config.training.beta_vq_warmup_steps,
+        num_beams=config.training.cycle.num_beams,
+        do_sample=config.training.cycle.do_sample,
     )
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
 
