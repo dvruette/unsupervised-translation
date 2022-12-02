@@ -1,6 +1,7 @@
 outputs
 wmt*_scripts
 lsf.*
+slurm-*
 
 # Marvin Stuff
 pyrightconfig.json
