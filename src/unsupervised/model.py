@@ -40,6 +40,42 @@ class AutoEncoder(nn.Module):
             encoder_attention_mask=attention_mask,
         )
 
+
+class Critic(nn.Module):
+    def __init__(self, d_model: int, n_pools: int, d_proj: int = 128):
+        super().__init__()
+        self.d_model = d_model
+        self.n_pools = n_pools
+        self.d_proj = d_proj
+
+        self.proj = nn.Linear(self.d_model, self.d_proj)
+        self.fc = nn.Sequential(
+            nn.Linear(self.n_pools * self.d_proj, self.d_model),
+            nn.ReLU(),
+            nn.Linear(self.d_model, 1),
+        )
+
+    def forward(self, x):
+        # input shape: (batch_size, n_pools, d_model)
+        # output shape: (batch_size,)
+        x = self.proj(x)
+        x = x.view(-1, self.n_pools * self.d_proj)
+        x = self.fc(x)
+        return x.squeeze(-1)
+
+
+def _bleu_score(tokens, target, tokenizer):
+    bleu = evaluate.load("bleu")
+    xs = tokenizer.batch_decode(tokens, skip_special_tokens=True)
+    ys = tokenizer.batch_decode(target, skip_special_tokens=True)
+
+    filtered = [(x.strip(), y.strip()) for x, y in zip(xs, ys) if x.strip() and y.strip()]
+    if len(filtered) == 0:
+        return {"bleu": 0}
+
+    xs, ys = tuple(zip(*filtered))
+    return bleu.compute(predictions=xs, references=ys)
+
 def get_tokenizers(path_a="bert-base-cased", path_b="deepset/gbert-base"):
     tokenizer_a = BertTokenizer.from_pretrained(path_a)
     tokenizer_b = BertTokenizer.from_pretrained(path_b)
@@ -81,37 +117,6 @@ def build_autoencoder(
     return autoencoder
 
 
-def _bleu_score(tokens, target, tokenizer):
-    bleu = evaluate.load("bleu")
-    xs = tokenizer.batch_decode(tokens, skip_special_tokens=True)
-    ys = tokenizer.batch_decode(target, skip_special_tokens=True)
-
-    filtered = [(x.strip(), y.strip()) for x, y in zip(xs, ys) if x.strip() and y.strip()]
-    if len(filtered) == 0:
-        return {"bleu": 0}
-
-    xs, ys = tuple(zip(*filtered))
-    return bleu.compute(predictions=xs, references=ys)
-
-class CosineLoss(nn.Module):
-    def __init__(self, dim=1, reduction="mean", eps=1e-8):
-        super().__init__()
-        self.dim = dim
-        self.reduction = reduction
-        self.eps = eps
-
-        if reduction not in ["mean", "sum", "none"]:
-            raise ValueError(f"Invalid reduction: {reduction}")
-
-    def forward(self, x, y):
-        loss = 1 - F.cosine_similarity(x, y, dim=self.dim, eps=self.eps)
-        if self.reduction == "mean":
-            loss = loss.mean()
-        elif self.reduction == "sum":
-            loss = loss.sum()
-        return loss
-
-
 class UnsupervisedTranslation(pl.LightningModule):
     def __init__(
         self,
@@ -122,18 +127,10 @@ class UnsupervisedTranslation(pl.LightningModule):
         num_decoder_layers: int = 6,
         pooling: Literal["mean", "max", "attention"] = "max",
         n_pools: int = 1,
-        latent_regularizer: Literal["vq", "norm", "norm+vq", "none"] = "none",
-        distance_metric: Literal["cosine", "l2"] = "l2",
-        use_latent_projection: bool = False,
         d_model: int = 512,
         n_codes: int = 1024,
         n_groups: int = 2,
-        beta_cycle: float = 0.1,
-        beta_vq: float = 0.1,
-        beta_cycle_warmup_steps: int = 1000,
-        beta_vq_warmup_steps: int = 100,
-        num_beams: int = 1,
-        do_sample: bool = True,
+        beta_critic: float = 1.0,
         lr: float = 1e-4,
         lr_schedule: Literal["constant", "cosine"] = "constant",
         lr_warmup_steps: int = 2000,
@@ -146,18 +143,10 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.use_oracle = use_oracle
         self.pooling = pooling
         self.n_pools = n_pools
-        self.latent_regularizer = latent_regularizer
-        self.distance_metric = distance_metric
-        self.use_latent_projection = use_latent_projection
         self.n_codes = n_codes
         self.n_groups = n_groups
         self.d_model = d_model
-        self.beta_cycle = beta_cycle
-        self.beta_vq = beta_vq
-        self.beta_cycle_warmup_steps = beta_cycle_warmup_steps
-        self.beta_vq_warmup_steps = beta_vq_warmup_steps
-        self.num_beams = num_beams
-        self.do_sample = do_sample
+        self.beta_critic = beta_critic
         self.lr = lr
         self.lr_schedule = lr_schedule
         self.lr_warmup_steps = lr_warmup_steps
@@ -196,34 +185,10 @@ class UnsupervisedTranslation(pl.LightningModule):
 
         self.lnorm = nn.LayerNorm(d_model)
 
-        if self.use_latent_projection:
-            self.proj_a_to_b = nn.Linear(d_model, d_model)
-            self.proj_b_to_a = nn.Linear(d_model, d_model)
-        else:
-            self.proj_a_to_b = nn.Identity()
-            self.proj_b_to_a = nn.Identity()
+        self.critic = Critic(d_model, n_pools)
 
-        if "vq" in self.latent_regularizer:
-            self.vq_embed = VectorQuantizeEMA(d_model, self.n_codes, self.n_groups)
-        if self.latent_regularizer not in ["norm", "lnorm", "vq", "norm+vq", "lnorm+vq", "none"]:
-            raise ValueError(f"Unknown regularizer: {self.latent_regularizer}")
+        self.cycle_loss = nn.MSELoss()
 
-        if self.distance_metric == "cosine":
-            self.cycle_loss = CosineLoss(dim=-1)
-        elif self.distance_metric == "l2":
-            self.cycle_loss = nn.MSELoss()
-        else:
-            raise ValueError(f"Unknown distance metric: {self.distance_metric}")
-
-    def _beta_cycle(self, step):
-        if self.beta_cycle_warmup_steps == 0:
-            return self.beta_cycle
-        return min(1.0, (step + 1) / self.beta_cycle_warmup_steps) * self.beta_cycle
-
-    def _beta_vq(self, step):
-        if self.beta_vq_warmup_steps == 0:
-            return self.beta_vq
-        return min(1.0, (step + 1) / self.beta_vq_warmup_steps) * self.beta_vq
 
     def _encode(self, encoder: BertModel, pooling: nn.Module, *args, **kwargs):
         # get compute hidden states
@@ -237,16 +202,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         # layer norm
         z = self.lnorm(z)
 
-        if "norm" in self.latent_regularizer.split("+"):
-            z = F.normalize(z, dim=-1)
-
-        if "vq" in self.latent_regularizer.split("+"):
-            # vector-quantize embeddings
-            vq_z = self.vq_embed(z)
-            vq_z["z_pre"] = z
-            return vq_z
-        else:
-            return {"z_pre": z, "z": z}
+        return {"z_pre": z, "z": z}
 
     def _decode(self, decoder: CustomBertLMHeadModel, input_ids: torch.Tensor, z: torch.Tensor, **kwargs):
         decoder_out = decoder(input_ids, encoder_hidden_states=z, **kwargs)
@@ -268,112 +224,69 @@ class UnsupervisedTranslation(pl.LightningModule):
         enc_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
         enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
         z_a, z_b = enc_a["z"], enc_b["z"]
-        
-        if self.use_latent_projection:
-            enc_ab = self.vq_embed(self.proj_a_to_b(enc_a["z_pre"]))
-            enc_ba = self.vq_embed(self.proj_b_to_a(enc_b["z_pre"]))
-            z_ab = enc_ab["z"]
-            z_ba = enc_ba["z"]
-        else:
-            z_ab = z_a
-            z_ba = z_b
 
+        logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
+        logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
 
-        if self.use_oracle:
-            # for testing: learn to translate with labels
-            logits_a = self.decode_a(batch["input_ids"][:, :-1], z_b)
-            logits_b = self.decode_b(batch["labels"][:, :-1], z_a)
-        else:
-            logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
-            logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
-
-        if self.use_oracle:
-            # compute cycle consistency loss
-            l_cycle_a = self.cycle_loss(z_ab, z_b)
-            l_cycle_b = self.cycle_loss(z_ba, z_a)
-        else:
-            # set models to evalution mode
-            self.autoencoder_a.eval()
-            self.autoencoder_b.eval()
-            with torch.no_grad():
-                x_hat_b = self.autoencoder_b.decoder.generate(
-                    input_ids=batch["input_ids"][:,:1],
-                    encoder_hidden_states=z_ab,
-                    eos_token_id=self.tokenizer_b.sep_token_id,
-                    max_new_tokens=128-1,
-                    num_beams=self.num_beams,
-                    do_sample=self.do_sample,
-                )
-                x_hat_a = self.autoencoder_a.decoder.generate(
-                    input_ids=batch["labels"][:,:1],
-                    encoder_hidden_states=z_ba,
-                    eos_token_id=self.tokenizer_a.sep_token_id,
-                    max_new_tokens=128-1,
-                    num_beams=self.num_beams,
-                    do_sample=self.do_sample,
-                )
-            # set models back to training mode
-            if self.training:
-                self.autoencoder_a.train()
-                self.autoencoder_b.train()
-
-            # generate attention mask for generated tokens
-            sep_a_id = self.tokenizer_a.sep_token_id
-            sep_b_id = self.tokenizer_b.sep_token_id
-            mask_a = (x_hat_a == sep_a_id).long()
-            mask_b = (x_hat_b != sep_b_id).long()
-            attention_mask_a = 1 - mask_a.cumsum(dim=-1) + mask_a
-            attention_mask_b = 1 - mask_b.cumsum(dim=-1) + mask_b
-
-            enc_hat_a = self.encode_a(x_hat_a, attention_mask=attention_mask_a)
-            enc_hat_b = self.encode_b(x_hat_b, attention_mask=attention_mask_b)
-            z_hat_a, z_hat_b = enc_hat_a["z"], enc_hat_b["z"]
-
-            # compute cycle consistency loss
-            l_cycle_a = self.cycle_loss(z_ab, z_hat_b)
-            l_cycle_b = self.cycle_loss(z_ba, z_hat_a)
-
-        l_cycle = l_cycle_a + l_cycle_b
+        l_adv_a = -self.critic(z_a).mean()
+        l_adv_b = self.critic(z_b).mean()
+        l_adv = l_adv_a + l_adv_b
 
         # compute reconstruction loss
         l_rec_a = F.cross_entropy(logits_a.transpose(1, 2), batch["input_ids"][:, 1:], ignore_index=self.tokenizer_a.pad_token_id)
         l_rec_b = F.cross_entropy(logits_b.transpose(1, 2), batch["labels"][:, 1:], ignore_index=self.tokenizer_b.pad_token_id)
         l_rec = l_rec_a + l_rec_b
         # compute total loss
-        loss = l_rec + self._beta_cycle(self.global_step) * l_cycle
-        # add VQ loss if applicable
-        if "loss" in enc_a:
-            loss += self._beta_vq(self.global_step) * (enc_a["loss"] + enc_b["loss"])
-
-        metrics = {}
-        if "loss" in enc_a:
-            metrics["l_vq"] = (enc_a["loss"] + enc_b["loss"]) / 2
-            metrics["l_vq_a"] = enc_a["loss"]
-            metrics["l_vq_b"] = enc_b["loss"]
-        if "entropy" in enc_a:
-            metrics["entropy"] = (enc_a["entropy"] + enc_b["entropy"]) / 2
-            metrics["entropy_a"] = enc_a["entropy"]
-            metrics["entropy_b"] = enc_b["entropy"]
-        if "avg_usage" in enc_a:
-            metrics["avg_usage"] = (enc_a["avg_usage"] + enc_b["avg_usage"]) / 2
-            metrics["avg_usage_a"] = enc_a["avg_usage"]
-            metrics["avg_usage_b"] = enc_b["avg_usage"]
+        loss = l_rec + self.beta_critic*l_adv
 
         return {
             "loss": loss,
             "l_rec": l_rec / 2,
             "l_rec_a": l_rec_a,
             "l_rec_b": l_rec_b,
-            "l_cycle": l_cycle / 2,
-            "l_cycle_a": l_cycle_a,
-            "l_cycle_b": l_cycle_b,
-            **metrics,
+            "l_adv": l_adv / 2,
+            "l_adv_a": l_adv_a,
+            "l_adv_b": l_adv_b,
         }
 
-    def training_step(self, batch, batch_idx):
-        metrics = self.get_loss(batch)
-        self.log("train", metrics, prog_bar=False, sync_dist=True)
-        return metrics
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        with torch.no_grad():
+            for param in self.critic.parameters():
+                param.clamp_(-0.01, 0.01)
+
+        if optimizer_idx == 0:
+            # train autoencoders for reconstruction
+            metrics = self.get_loss(batch)
+            loss = metrics["loss"]
+            for key, val in metrics.items():
+                self.log(f"train.{key}", val, prog_bar=False)
+        elif optimizer_idx == 1:
+            # train critic to discriminate between z_a and z_b
+            enc_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
+            enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
+            z_a, z_b = enc_a["z"], enc_b["z"]
+
+            loss = self.critic(z_a).mean() - self.critic(z_b).mean()
+
+            self.log(f"train.l_critic", loss, prog_bar=False)
+        elif optimizer_idx == 2:
+            # train only encoder to fool critic
+            enc_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
+            enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
+            z_a, z_b = enc_a["z"], enc_b["z"]
+
+            l_adv_a = -self.critic(z_a).mean()
+            l_adv_b = self.critic(z_b).mean()
+            loss = l_adv_a + l_adv_b
+
+            metrics = {
+                "l_adv": loss / 2,
+                "l_adv_a": l_adv_a,
+                "l_adv_b": l_adv_b,
+            }
+            for key, val in metrics.items():
+                self.log(f"train.{key}", val, prog_bar=False)
+        return loss
 
     def validation_step(self, batch, batch_idx):
         # compute batch metrics
@@ -392,10 +305,11 @@ class UnsupervisedTranslation(pl.LightningModule):
 
         # compute BLEU score
         if (
-            self.global_step % self.bleu_eval_freq == 0
-            and self.global_step > 0
-            and self.global_rank == 0
-            and batch_idx < 16
+            self.bleu_eval_freq > 0 and
+            self.global_step % self.bleu_eval_freq == 0 and
+            self.global_step > 0 and
+            self.global_rank == 0 and
+            batch_idx < 16
         ):
             with torch.no_grad():
                 beam_z_a = z_a.repeat_interleave(4, dim=0)
@@ -429,32 +343,56 @@ class UnsupervisedTranslation(pl.LightningModule):
         return metrics
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(
-            self.parameters(),
+        optimizer_rec = torch.optim.AdamW(
+            [
+                {"params": self.autoencoder_a.parameters()},
+                {"params": self.autoencoder_b.parameters()},
+                {"params": self.lnorm.parameters()},
+            ],
+            lr=self.lr,
+            weight_decay=0.01,
+        )
+        optimizer_critic = torch.optim.RMSprop(self.critic.parameters(), lr=1e-4)
+        optimizer_enc = torch.optim.AdamW(
+            [
+                {"params": self.autoencoder_a.encoder.parameters()},
+                {"params": self.autoencoder_b.encoder.parameters()},
+            ],
             lr=self.lr,
             weight_decay=0.01,
         )
         if self.lr_schedule == "constant":
             # linear warmup with constant learning rate
             scheduler = torch.optim.lr_scheduler.LambdaLR(
-                optimizer,
+                optimizer_rec,
                 lambda t: min(1.0, (t+1) / max(1, self.lr_warmup_steps)),
             )
         elif self.lr_schedule == "cosine":
             # linear warmup with cosine decay to 0.1 * lr
             scheduler = torch.optim.lr_scheduler.LambdaLR(
-                optimizer,
+                optimizer_rec,
                 lambda t: min(1, ((t+1) / max(1, self.lr_warmup_steps))) * (0.9 * (1 + math.cos(math.pi * t / self.lr_max_steps))/2 + 0.1),
             )
         else:
             raise ValueError(f"Unknown lr_schedule {self.lr_schedule}")
-        return {
-            "optimizer": optimizer,
-            "lr_scheduler": {
-                "scheduler": scheduler,
-                "interval": "step",
-            }
-        }
+        return (
+            {
+                "optimizer": optimizer_rec,
+                "lr_scheduler": {
+                    "scheduler": scheduler,
+                    "interval": "step",
+                },
+                "frequency": 1,
+            },
+            {
+                "optimizer": optimizer_critic,
+                "frequency": 5,
+            },
+            {
+                "optimizer": optimizer_enc,
+                "frequency": 1,
+            },
+        )
 
     def _translate(
         self,

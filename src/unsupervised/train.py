@@ -15,10 +15,8 @@ sys.path.append(os.getenv("PWD", "."))
 # load the `.env` file
 dotenv.load_dotenv()
 
-from src.unsupervised.model import get_tokenizers
 from src.unsupervised.model import UnsupervisedTranslation
 from src.data import get_dataset, DataCollatorForUnsupervisedMT
-
 
 
 @hydra.main(config_path="../config", config_name="unsupervised", version_base="1.1")
@@ -39,9 +37,6 @@ def main(config):
         use_oracle=config.model.use_oracle,
         pooling=config.model.pooling,
         n_pools=config.model.n_pools,
-        latent_regularizer=config.model.latent_regularizer,
-        distance_metric=config.model.distance_metric,
-        use_latent_projection=config.model.use_latent_projection,
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,
         n_codes=config.model.vq.n_codes,
@@ -50,12 +45,7 @@ def main(config):
         lr_schedule=config.training.optimizer.schedule,
         lr_warmup_steps=config.training.optimizer.warmup_steps,
         lr_max_steps=config.training.optimizer.max_steps,
-        beta_cycle=config.training.beta_cycle,
-        beta_vq=config.training.beta_vq,
-        beta_cycle_warmup_steps=config.training.beta_cycle_warmup_steps,
-        beta_vq_warmup_steps=config.training.beta_vq_warmup_steps,
-        num_beams=config.training.cycle.num_beams,
-        do_sample=config.training.cycle.do_sample,
+        beta_critic=config.training.beta_critic,
     )
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
 
