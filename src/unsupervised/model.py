@@ -131,7 +131,10 @@ class UnsupervisedTranslation(pl.LightningModule):
         n_codes: int = 1024,
         n_groups: int = 2,
         beta_critic: float = 1.0,
-        lr: float = 1e-4,
+        lr_rec: float = 1e-4,
+        lr_critic: float = 2e-5,
+        lr_enc: float = 2e-5,
+        n_critic_steps: int = 5,
         lr_schedule: Literal["constant", "cosine"] = "constant",
         lr_warmup_steps: int = 2000,
         lr_max_steps: int = 100000,
@@ -147,10 +150,12 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.n_groups = n_groups
         self.d_model = d_model
         self.beta_critic = beta_critic
-        self.lr = lr
+        self.lr_rec = lr_rec
+        self.lr_critic = lr_critic
         self.lr_schedule = lr_schedule
         self.lr_warmup_steps = lr_warmup_steps
         self.lr_max_steps = lr_max_steps
+        self.n_critic_steps = n_critic_steps
         self.bleu_eval_freq = bleu_eval_freq
 
         self.tokenizer_a, self.tokenizer_b = get_tokenizers(tokenizer_path_a, tokenizer_path_b)
@@ -349,16 +354,16 @@ class UnsupervisedTranslation(pl.LightningModule):
                 {"params": self.autoencoder_b.parameters()},
                 {"params": self.lnorm.parameters()},
             ],
-            lr=self.lr,
+            lr=self.lr_rec,
             weight_decay=0.01,
         )
-        optimizer_critic = torch.optim.RMSprop(self.critic.parameters(), lr=1e-4)
+        optimizer_critic = torch.optim.RMSprop(self.critic.parameters(), lr=self.lr_critic)
         optimizer_enc = torch.optim.AdamW(
             [
                 {"params": self.autoencoder_a.encoder.parameters()},
                 {"params": self.autoencoder_b.encoder.parameters()},
             ],
-            lr=self.lr,
+            lr=self.lr_enc,
             weight_decay=0.01,
         )
         if self.lr_schedule == "constant":
@@ -386,7 +391,7 @@ class UnsupervisedTranslation(pl.LightningModule):
             },
             {
                 "optimizer": optimizer_critic,
-                "frequency": 5,
+                "frequency": self.n_critic_steps,
             },
             {
                 "optimizer": optimizer_enc,

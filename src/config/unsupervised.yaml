@@ -28,7 +28,10 @@ training:
   accumulate_batches: 1
   beta_critic: 1.0
   optimizer:
-    lr: 1e-4
+    lr_rec: 1e-4
+    lr_critic: 2e-5
+    lr_enc: 2e-5
+    n_critic_steps: 5
     warmup_steps: 0
     max_steps: 100000
     schedule: cosine
