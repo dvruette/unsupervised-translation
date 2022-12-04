@@ -19,14 +19,12 @@ model:
   use_latent_projection: false
   num_encoder_layers: 4
   num_decoder_layers: 6
-  vq:
-    n_codes: 2048
-    n_groups: 8
 training:
   batch_size: 64
   devices: 4
   accumulate_batches: 1
   beta_critic: 1.0
+  critic_loss: classifier
   optimizer:
     lr_rec: 1e-4
     lr_critic: 2e-5

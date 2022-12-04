@@ -134,6 +134,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         lr_rec: float = 1e-4,
         lr_critic: float = 2e-5,
         lr_enc: float = 2e-5,
+        critic_loss: Literal["wasserstein", "classifier"] = "wasserstein",
         n_critic_steps: int = 5,
         lr_schedule: Literal["constant", "cosine"] = "constant",
         lr_warmup_steps: int = 2000,
@@ -152,10 +153,11 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.beta_critic = beta_critic
         self.lr_rec = lr_rec
         self.lr_critic = lr_critic
-        self.lr_env = lr_enc
+        self.lr_enc = lr_enc
         self.lr_schedule = lr_schedule
         self.lr_warmup_steps = lr_warmup_steps
         self.lr_max_steps = lr_max_steps
+        self.critic_loss = critic_loss
         self.n_critic_steps = n_critic_steps
         self.bleu_eval_freq = bleu_eval_freq
 
@@ -234,8 +236,12 @@ class UnsupervisedTranslation(pl.LightningModule):
         logits_a = self.decode_a(batch["input_ids"][:, :-1], z_a)
         logits_b = self.decode_b(batch["labels"][:, :-1], z_b)
 
-        l_adv_a = -self.critic(z_a).mean()
-        l_adv_b = self.critic(z_b).mean()
+        if self.critic_loss == "wasserstein":
+            l_adv_a = self.critic(z_a).mean()
+            l_adv_b = -self.critic(z_b).mean()
+        elif self.critic_loss == "classifier":
+            l_adv_a = F.binary_cross_entropy_with_logits(self.critic(z_a), torch.zeros_like(self.critic(z_a)))
+            l_adv_b = F.binary_cross_entropy_with_logits(self.critic(z_b), torch.ones_like(self.critic(z_b)))
         l_adv = l_adv_a + l_adv_b
 
         # compute reconstruction loss
@@ -243,7 +249,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         l_rec_b = F.cross_entropy(logits_b.transpose(1, 2), batch["labels"][:, 1:], ignore_index=self.tokenizer_b.pad_token_id)
         l_rec = l_rec_a + l_rec_b
         # compute total loss
-        loss = l_rec + self.beta_critic*l_adv
+        loss = l_rec - self.beta_critic*l_adv
 
         return {
             "loss": loss,
@@ -272,7 +278,11 @@ class UnsupervisedTranslation(pl.LightningModule):
             enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
             z_a, z_b = enc_a["z"], enc_b["z"]
 
-            loss = self.critic(z_a).mean() - self.critic(z_b).mean()
+            if self.critic_loss == "wasserstein":
+                loss = self.critic(z_a).mean() - self.critic(z_b).mean()
+            elif self.critic_loss == "classifier":
+                loss = F.binary_cross_entropy_with_logits(self.critic(z_a), torch.zeros_like(self.critic(z_a))) + \
+                       F.binary_cross_entropy_with_logits(self.critic(z_b), torch.ones_like(self.critic(z_b)))
 
             self.log(f"train.l_critic", loss, prog_bar=False)
         elif optimizer_idx == 2:
@@ -281,8 +291,12 @@ class UnsupervisedTranslation(pl.LightningModule):
             enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
             z_a, z_b = enc_a["z"], enc_b["z"]
 
-            l_adv_a = -self.critic(z_a).mean()
-            l_adv_b = self.critic(z_b).mean()
+            if self.critic_loss == "wasserstein":
+                l_adv_a = self.critic(z_a).mean()
+                l_adv_b = -self.critic(z_b).mean()
+            elif self.critic_loss == "classifier":
+                l_adv_a = F.binary_cross_entropy_with_logits(self.critic(z_a), torch.zeros_like(self.critic(z_a)))
+                l_adv_b = F.binary_cross_entropy_with_logits(self.critic(z_b), torch.ones_like(self.critic(z_b)))
             loss = l_adv_a + l_adv_b
 
             metrics = {
