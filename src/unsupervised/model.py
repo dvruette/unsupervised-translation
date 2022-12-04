@@ -152,6 +152,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.beta_critic = beta_critic
         self.lr_rec = lr_rec
         self.lr_critic = lr_critic
+        self.lr_env = lr_enc
         self.lr_schedule = lr_schedule
         self.lr_warmup_steps = lr_warmup_steps
         self.lr_max_steps = lr_max_steps
