@@ -90,6 +90,8 @@ class SupervisedTranslation(pl.LightningModule):
     def validation_step(self, batch, batch_idx):
         loss = self.get_loss(batch)
 
+        metrics = {"loss": loss}
+
         if (
             self.global_step % self.bleu_eval_freq == 0
             and self.global_step != 0
@@ -118,9 +120,9 @@ class SupervisedTranslation(pl.LightningModule):
                     bleu = evaluate.load("bleu")
                     bleu_score = bleu.compute(predictions=xs, references=ys)
 
-                self.log("eval", {"bleu": bleu_score["bleu"]}, prog_bar=True)
-        self.log("val", {"loss": loss}, prog_bar=True)
-        return loss
+                self.log("eval", {"bleu": bleu_score["bleu"]}, prog_bar=False)
+        self.log("val", metrics, prog_bar=False, sync_dist=True)
+        return metrics
 
     def configure_optimizers(self):
         optimizer = torch.optim.AdamW(self.parameters(), self.lr)
