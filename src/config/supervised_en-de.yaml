@@ -18,6 +18,6 @@ training:
   max_steps: 100000
   max_epochs: 50
   val:
-    check_interval: 256
+    check_interval: 32
     limit_batches: 128
-    bleu_eval_freq: 10
+    bleu_eval_freq: 32
