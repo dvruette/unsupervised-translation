@@ -98,9 +98,9 @@ class SupervisedTranslation(pl.LightningModule):
             ):
             with torch.no_grad():
                 pred_tokens = self.autoencoder.generate(
-                    input_ids=batch["input_ids"],
+                        input_ids=batch["input_ids"][:,:1],
                     attention_mask=batch["attention_mask"],
-                    decoder_input_ids=batch["labels"],
+                    decoder_input_ids=batch["labels"][:,:1],
                     max_new_tokens=64,
                     num_beams=64
                 )
