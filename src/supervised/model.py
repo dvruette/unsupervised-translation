@@ -98,14 +98,13 @@ class SupervisedTranslation(pl.LightningModule):
             ):
             with torch.no_grad():
 
-                beam_input_ids = batch["input_ids"].repeat_interleave(4, dim=0)
                 pred_tokens = self.autoencoder.generate(
                     input_ids=batch["input_ids"],
-                    encoder_hidden_states=beam_input_ids,
                     attention_mask=batch["attention_mask"],
                     decoder_input_ids=batch["labels"][:,:1],
                     max_new_tokens=64,
-                    num_beams=4
+                    num_beams=1,
+                    do_sample=False
                 )
 
                 inputs = self.src_tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
@@ -119,7 +118,7 @@ class SupervisedTranslation(pl.LightningModule):
                     bleu = evaluate.load("bleu")
                     bleu_score = bleu.compute(predictions=xs, references=ys)
 
-                self.log("eval", {"bleu": bleu_score}, prog_bar=True)
+                self.log("eval", {"bleu": bleu_score["bleu"]}, prog_bar=True)
         self.log("val", {"loss": loss}, prog_bar=True)
         return loss
 
