@@ -96,27 +96,27 @@ class SupervisedTranslation(pl.LightningModule):
             and self.global_rank == 0
             and batch_idx < 16
             ):
-            with torch.no_grad()
-            pred_tokens = self.autoencoder.generate(
-                input_ids=batch["input_ids"],
-                attention_mask=batch["attention_mask"],
-                decoder_input_ids=batch["labels"],
-                max_new_tokens=64,
-                num_beams=64
-            )
+            with torch.no_grad():
+                pred_tokens = self.autoencoder.generate(
+                    input_ids=batch["input_ids"],
+                    attention_mask=batch["attention_mask"],
+                    decoder_input_ids=batch["labels"],
+                    max_new_tokens=64,
+                    num_beams=64
+                )
 
-            inputs = self.src_tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
-            translations= self.tgt_tokenizer.batch_decode(pred_tokens, skip_special_tokens=True)
+                inputs = self.src_tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
+                translations= self.tgt_tokenizer.batch_decode(pred_tokens, skip_special_tokens=True)
 
-            filtered = [(x.strip(), y.strip()) for x, y in zip(inputs, translations) if x.strip() and y.strip()]
+                filtered = [(x.strip(), y.strip()) for x, y in zip(inputs, translations) if x.strip() and y.strip()]
 
-            bleu_score = 0.0
-            if len(filtered) > 0:
-                xs, ys = tuple(zip(*filtered))
-                bleu = evaluate.load("bleu")
-                bleu_score = bleu.compute(predictions=xs, references=ys)
+                bleu_score = 0.0
+                if len(filtered) > 0:
+                    xs, ys = tuple(zip(*filtered))
+                    bleu = evaluate.load("bleu")
+                    bleu_score = bleu.compute(predictions=xs, references=ys)
 
-            self.log("eval", {"bleu": bleu_score}, prog_bar=True)
+                self.log("eval", {"bleu": bleu_score}, prog_bar=True)
         self.log("val", {"loss": loss}, prog_bar=True)
         return loss
 

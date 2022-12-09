@@ -32,7 +32,7 @@ def main(config):
 
     autoencoder, src_tokenizer, tgt_tokenizer = get_model_and_tokenizer()
 
-    model = SupervisedTranslation(autoencoder, lr=config.training.learning_rate)
+    model = SupervisedTranslation(autoencoder, bleu_eval_freq=config.training.val.bleu_eval_freq, lr=config.training.learning_rate)
 
     ds = get_dataset(
         dataset_name=config.data.dataset_name,
