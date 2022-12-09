@@ -20,3 +20,4 @@ training:
   val:
     check_interval: 256
     limit_batches: 128
+    bleu_eval_freq: 10
