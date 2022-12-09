@@ -268,7 +268,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         enc_a = self.encode_a(batch["input_ids"], attention_mask=batch["attention_mask_src"])
         enc_b = self.encode_b(batch["labels"], attention_mask=batch["attention_mask_tgt"])
         z_a, z_b = enc_a["z"], enc_b["z"]
-        
+
         if self.use_latent_projection:
             enc_ab = self.vq_embed(self.proj_a_to_b(enc_a["z_pre"]))
             enc_ba = self.vq_embed(self.proj_b_to_a(enc_b["z_pre"]))
