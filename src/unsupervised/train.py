@@ -34,7 +34,7 @@ def main(config):
     model = UnsupervisedTranslation(
         tokenizer_path_a=config.data.tokenizer_path_a,
         tokenizer_path_b=config.data.tokenizer_path_b,
-        use_oracle=config.model.use_oracle,
+        do_backtranslation=config.training.do_backtranslation,
         pooling=config.model.pooling,
         n_pools=config.model.n_pools,
         num_encoder_layers=config.model.num_encoder_layers,
@@ -48,6 +48,7 @@ def main(config):
         lr_warmup_steps=config.training.optimizer.warmup_steps,
         lr_max_steps=config.training.optimizer.max_steps,
         beta_critic=config.training.beta_critic,
+        beta_cycle=config.training.beta_cycle,
     )
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
 
