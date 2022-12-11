@@ -44,7 +44,7 @@ def main(config):
         lr_enc=config.training.optimizer.lr_enc,
         critic_loss=config.training.critic_loss,
         n_critic_steps=config.training.optimizer.n_critic_steps,
-        lr_schedule=config.training.optimizer.schedule,
+        lr_schedule=config.training.optimizer.lr_schedule,
         lr_warmup_steps=config.training.optimizer.warmup_steps,
         lr_max_steps=config.training.optimizer.max_steps,
         beta_critic=config.training.beta_critic,
