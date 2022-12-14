@@ -2,6 +2,7 @@ hydra:
   run:
     dir: ${oc.env:SCRATCH,.}/outputs/unsupervised/${now:%Y-%m-%d}/${now:%H-%M-%S}
 group: unsupervised
+resume_from_checkpoint: null
 data:
   dataset_name: wmt14
   language_pair: de-en
