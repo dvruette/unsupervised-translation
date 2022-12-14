@@ -102,10 +102,14 @@ def main(config):
             attention_mask_b = tokens_b["attention_mask"].to(device)
 
             batch = {
-                "input_ids": input_ids_a,
-                "labels": input_ids_b,
-                "attention_mask_src": attention_mask_a,
-                "attention_mask_tgt": attention_mask_b,
+                "src_input_ids": input_ids_a,
+                "tgt_input_ids": input_ids_b,
+                "src_labels": input_ids_a,
+                "tgt_labels": input_ids_b,
+                "src_attention_mask": attention_mask_a,
+                "tgt_attention_mask": attention_mask_b,
+                "src_label_mask": attention_mask_a,
+                "tgt_label_mask": attention_mask_b,
             }
             ms = model.get_loss(batch)
             metrics.append(ms)

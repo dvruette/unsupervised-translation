@@ -407,10 +407,12 @@ class UnsupervisedTranslation(pl.LightningModule):
             batch_idx < 16
         ):
             scores = self.compute_bleu(batch, z_a, z_b)
-            self.log("eval", scores, prog_bar=True)
+            for key, val in scores.items():
+                self.log(f"eval.{key}", val, prog_bar=False)
 
         # log metrics
-        self.log("val", metrics, prog_bar=False, sync_dist=True)
+        for key, val in metrics.items():
+                self.log(f"val.{key}", val, prog_bar=False)
         return metrics
 
     def configure_optimizers(self):
