@@ -70,6 +70,7 @@ def main(config):
         lr_max_steps=config.training.optimizer.max_steps,
         beta_critic=config.training.beta_critic,
         beta_cycle=config.training.beta_cycle,
+        bleu_eval_freq=config.training.val.bleu_eval_freq,
     )
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
 

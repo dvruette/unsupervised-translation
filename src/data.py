@@ -55,13 +55,14 @@ class DataCollatorForUnsupervisedMT:
 
     def _augment(self, text: str):
         words = text.split(" ")
-        # each word has a 10% chance of being deleted
-        words = [word for word in words if random.random() > self.p_del]
-        for _ in range(self.k_perm):
-            # each bigram has a 10% chance of being permuted
-            for i, j in zip(range(len(words) - 1), range(1, len(words))):
-                if random.random() < self.p_perm:
-                    words[i], words[j] = words[j], words[i]
+        if random.random() < 0.9:
+            # each word has a 10% chance of being deleted
+            words = [word for word in words if random.random() > self.p_del]
+            for k in range(self.k_perm):
+                # each bigram has a 10% chance of being permuted
+                for i, j in zip(range(k % 2, len(words) - 1, 2), range(k % 2 + 1, len(words), 2)):
+                    if random.random() < self.p_perm:
+                        words[i], words[j] = words[j], words[i]
         text = " ".join(words)
         return text
 
