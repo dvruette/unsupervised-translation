@@ -55,21 +55,17 @@ def main(config):
     model = UnsupervisedTranslation(
         tokenizer_path_a=config.data.tokenizer_path_a,
         tokenizer_path_b=config.data.tokenizer_path_b,
-        do_backtranslation=config.training.do_backtranslation,
         pooling=config.model.pooling,
         n_pools=config.model.n_pools,
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,
         lr_rec=config.training.optimizer.lr_rec,
         lr_critic=config.training.optimizer.lr_critic,
-        lr_enc=config.training.optimizer.lr_enc,
+        lr_bt=config.training.optimizer.lr_bt,
         critic_loss=config.training.critic_loss,
         n_critic_steps=config.training.optimizer.n_critic_steps,
-        lr_schedule=config.training.optimizer.lr_schedule,
-        lr_warmup_steps=config.training.optimizer.warmup_steps,
-        lr_max_steps=config.training.optimizer.max_steps,
         beta_critic=config.training.beta_critic,
-        beta_cycle=config.training.beta_cycle,
+        beta_vq=config.training.beta_vq,
         bleu_eval_freq=config.training.val.bleu_eval_freq,
     )
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b

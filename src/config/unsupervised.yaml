@@ -24,18 +24,14 @@ training:
   batch_size: 64
   devices: 4
   accumulate_batches: 1
-  do_backtranslation: true
   critic_loss: classifier
-  beta_critic: 0.5
-  beta_cycle: 1.0
+  beta_critic: 0.25
+  beta_vq: 0.25
   optimizer:
     lr_rec: 1e-4
+    lr_bt: 1e-4
     lr_critic: 2e-5
-    lr_enc: 2e-5
     n_critic_steps: 4
-    warmup_steps: 0
-    max_steps: 100000
-    lr_schedule: cosine
   max_steps: 100000
   max_epochs: 50
   max_seq_len: 128

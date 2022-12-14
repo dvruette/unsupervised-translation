@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import BertConfig, BertModel, BertLMHeadModel, BertTokenizer
 
-from src.unsupervised.vq_vae import VectorQuantizeEMA
+from src.unsupervised.vq_embed import VectorQuantizeEMA
 from src.unsupervised.pooling import AttentionPooling, MaxPooling, MeanPooling
 
 
@@ -130,16 +130,13 @@ class UnsupervisedTranslation(pl.LightningModule):
         d_model: int = 512,
         n_codes: int = 1024,
         n_groups: int = 2,
-        beta_critic: float = 1.0,
-        beta_cycle: float = 1.0,
+        beta_critic: float = 0.25,
+        beta_vq: float = 0.1,
         lr_rec: float = 1e-4,
         lr_critic: float = 2e-5,
-        lr_enc: float = 2e-5,
+        lr_bt: float = 1e-4,
         critic_loss: Literal["wasserstein", "classifier"] = "wasserstein",
         n_critic_steps: int = 5,
-        lr_schedule: Literal["constant", "cosine"] = "constant",
-        lr_warmup_steps: int = 2000,
-        lr_max_steps: int = 100000,
         bleu_eval_freq: int = 2048,
     ):
         super().__init__()
@@ -152,13 +149,10 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.n_groups = n_groups
         self.d_model = d_model
         self.beta_critic = beta_critic
-        self.beta_cycle = beta_cycle
+        self.beta_vq = beta_vq
         self.lr_rec = lr_rec
         self.lr_critic = lr_critic
-        self.lr_enc = lr_enc
-        self.lr_schedule = lr_schedule
-        self.lr_warmup_steps = lr_warmup_steps
-        self.lr_max_steps = lr_max_steps
+        self.lr_bt = lr_bt
         self.critic_loss = critic_loss
         self.n_critic_steps = n_critic_steps
         self.bleu_eval_freq = bleu_eval_freq
@@ -192,27 +186,22 @@ class UnsupervisedTranslation(pl.LightningModule):
         else:
             raise ValueError(f"Invalid pooling type: {self.pooling}")
 
-
         self.lnorm = nn.LayerNorm(d_model)
-
+        self.vq = VectorQuantizeEMA(d_model, n_codes, n_groups)
         self.critic = Critic(d_model, n_pools)
-
-        self.cycle_loss = nn.MSELoss()
 
 
     def _encode(self, encoder: BertModel, pooling: nn.Module, *args, **kwargs):
         # get compute hidden states
         encoder_out = encoder(*args, **kwargs)
-
         # pool hidden states to get sentence embeddings
         h = encoder_out.last_hidden_state
         mask = kwargs.get("attention_mask", None)
         z = pooling(h, mask=mask)
-
         # layer norm
         z = self.lnorm(z)
-
-        return {"z_pre": z, "z": z}
+        # vector quantize
+        return self.vq(z)
 
     def _decode(self, decoder: CustomBertLMHeadModel, input_ids: torch.Tensor, z: torch.Tensor, **kwargs):
         decoder_out = decoder(input_ids, encoder_hidden_states=z, **kwargs)
@@ -243,7 +232,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         # generate attention mask for y_hat
         mask = (y_hat == tokenizer_tgt.sep_token_id).long()
         attention_mask = 1 - mask.cumsum(dim=-1) + mask
-        z_hat = encode_tgt(y_hat, attention_mask=attention_mask)["z"]
+        z_hat = encode_tgt(y_hat, attention_mask=attention_mask).z_q
         logits = decode_src(labels[:, :-1], z_hat)
         l_cycle = F.cross_entropy(logits.transpose(1, 2), labels[:, 1:], ignore_index=tokenizer_src.pad_token_id)
         return l_cycle
@@ -251,50 +240,19 @@ class UnsupervisedTranslation(pl.LightningModule):
     def get_loss(self, batch):
         enc_a = self.encode_a(batch["src_input_ids"], attention_mask=batch["src_attention_mask"])
         enc_b = self.encode_b(batch["tgt_input_ids"], attention_mask=batch["tgt_attention_mask"])
-        z_a, z_b = enc_a["z"], enc_b["z"]
+        z_a, z_b = enc_a.z_q, enc_b.z_q
 
         logits_a = self.decode_a(batch["src_labels"][:, :-1], z_a)
         logits_b = self.decode_b(batch["tgt_labels"][:, :-1], z_b)
 
-        if self.critic_loss == "wasserstein":
-            l_adv_a = self.critic(z_a).mean()
-            l_adv_b = -self.critic(z_b).mean()
-        elif self.critic_loss == "classifier":
-            l_adv_a = F.binary_cross_entropy_with_logits(self.critic(z_a), torch.zeros_like(self.critic(z_a)))
-            l_adv_b = F.binary_cross_entropy_with_logits(self.critic(z_b), torch.ones_like(self.critic(z_b)))
-        l_adv = l_adv_a + l_adv_b
-
-        if self.do_backtranslation:
-            l_cycle_a = self.cycle_loss(
-                z=z_a,
-                labels=batch["src_labels"],
-                generate_tgt=self.autoencoder_b.decoder.generate,
-                encode_tgt=self.encode_b,
-                decode_src=self.decode_a,
-                tokenizer_src=self.tokenizer_a,
-                tokenizer_tgt=self.tokenizer_b,
-            )
-            l_cycle_b = self.cycle_loss(
-                z=z_b,
-                labels=batch["tgt_labels"],
-                generate_tgt=self.autoencoder_a.decoder.generate,
-                encode_tgt=self.encode_a,
-                decode_src=self.decode_b,
-                tokenizer_src=self.tokenizer_b,
-                tokenizer_tgt=self.tokenizer_a,
-            )
-            l_cycle = l_cycle_a + l_cycle_b
-        else:
-            l_cycle_a = 0
-            l_cycle_b = 0
-            l_cycle = 0
+        l_adv = self.compute_critic_loss(batch, enc_a, enc_b)
 
         # compute reconstruction loss
         l_rec_a = F.cross_entropy(logits_a.transpose(1, 2), batch["src_labels"][:, 1:], ignore_index=self.tokenizer_a.pad_token_id)
         l_rec_b = F.cross_entropy(logits_b.transpose(1, 2), batch["tgt_labels"][:, 1:], ignore_index=self.tokenizer_b.pad_token_id)
         l_rec = l_rec_a + l_rec_b
         # compute total loss
-        loss = l_rec - self.beta_critic*l_adv + self.beta_cycle*l_cycle
+        loss = l_rec - self.beta_critic*l_adv + self.beta_vq*(enc_a.loss + enc_b.loss)
 
         return {
             "loss": loss,
@@ -302,58 +260,65 @@ class UnsupervisedTranslation(pl.LightningModule):
             "l_rec_a": l_rec_a,
             "l_rec_b": l_rec_b,
             "l_adv": l_adv / 2,
-            "l_adv_a": l_adv_a,
-            "l_adv_b": l_adv_b,
+            "l_vq": (enc_a.loss + enc_b.loss) / 2,
+            "l_vq_a": enc_a.loss,
+            "l_vq_b": enc_b.loss,
+            "entropy": (enc_a.entropy + enc_b.entropy) / 2 if self.training else None,
+        }
+
+    def compute_cycle_loss(self, batch):
+        enc_a = self.encode_a(batch["src_labels"], attention_mask=batch["src_label_mask"])
+        enc_b = self.encode_b(batch["tgt_labels"], attention_mask=batch["tgt_label_mask"])
+        z_a, z_b = enc_a.z_q, enc_b.z_q
+
+        l_adv = self.compute_critic_loss(batch, enc_a, enc_b)
+
+        l_cycle_a = self.cycle_loss(
+            z=z_a,
+            labels=batch["src_labels"],
+            generate_tgt=self.autoencoder_b.decoder.generate,
+            encode_tgt=self.encode_b,
+            decode_src=self.decode_a,
+            tokenizer_src=self.tokenizer_a,
+            tokenizer_tgt=self.tokenizer_b,
+        )
+        l_cycle_b = self.cycle_loss(
+            z=z_b,
+            labels=batch["tgt_labels"],
+            generate_tgt=self.autoencoder_a.decoder.generate,
+            encode_tgt=self.encode_a,
+            decode_src=self.decode_b,
+            tokenizer_src=self.tokenizer_b,
+            tokenizer_tgt=self.tokenizer_a,
+        )
+        l_cycle = l_cycle_a + l_cycle_b + l_adv + self.beta_vq*(enc_a.loss + enc_b.loss)
+        
+        return {
+            "loss": l_cycle,
             "l_cycle": l_cycle / 2,
             "l_cycle_a": l_cycle_a,
             "l_cycle_b": l_cycle_b,
+            "l_adv": l_adv / 2,
+            "l_vq": (enc_a.loss + enc_b.loss) / 2,
+            "l_vq_a": enc_a.loss,
+            "l_vq_b": enc_b.loss,
+            "entropy": (enc_a.entropy + enc_b.entropy) / 2,
         }
 
-    def training_step(self, batch, batch_idx, optimizer_idx):
-        with torch.no_grad():
-            for param in self.critic.parameters():
-                param.clamp_(-0.01, 0.01)
+    def compute_critic_loss(self, batch, enc_a=None, enc_b=None):
+        self.vq.eval()
+        if enc_a is None:
+            enc_a = self.encode_a(batch["src_labels"], attention_mask=batch["src_label_mask"])
+        if enc_b is None:
+            enc_b = self.encode_b(batch["tgt_labels"], attention_mask=batch["tgt_label_mask"])
+        z_a, z_b = enc_a.z_q, enc_b.z_q
 
-        if optimizer_idx == 0:
-            # train autoencoders for reconstruction
-            metrics = self.get_loss(batch)
-            loss = metrics["loss"]
-            for key, val in metrics.items():
-                self.log(f"train.{key}", val, prog_bar=False)
-        elif optimizer_idx == 1:
-            # train critic to discriminate between z_a and z_b
-            enc_a = self.encode_a(batch["src_input_ids"], attention_mask=batch["src_attention_mask"])
-            enc_b = self.encode_b(batch["tgt_input_ids"], attention_mask=batch["tgt_attention_mask"])
-            z_a, z_b = enc_a["z"], enc_b["z"]
-
-            if self.critic_loss == "wasserstein":
-                loss = self.critic(z_a).mean() - self.critic(z_b).mean()
-            elif self.critic_loss == "classifier":
-                loss = F.binary_cross_entropy_with_logits(self.critic(z_a), torch.zeros_like(self.critic(z_a))) + \
-                       F.binary_cross_entropy_with_logits(self.critic(z_b), torch.ones_like(self.critic(z_b)))
-
-            self.log(f"train.l_critic", loss, prog_bar=False)
-        elif optimizer_idx == 2:
-            # train only encoder to fool critic
-            enc_a = self.encode_a(batch["src_input_ids"], attention_mask=batch["src_attention_mask"])
-            enc_b = self.encode_b(batch["tgt_input_ids"], attention_mask=batch["tgt_attention_mask"])
-            z_a, z_b = enc_a["z"], enc_b["z"]
-
-            if self.critic_loss == "wasserstein":
-                l_adv_a = self.critic(z_a).mean()
-                l_adv_b = -self.critic(z_b).mean()
-            elif self.critic_loss == "classifier":
-                l_adv_a = F.binary_cross_entropy_with_logits(self.critic(z_a), torch.zeros_like(self.critic(z_a)))
-                l_adv_b = F.binary_cross_entropy_with_logits(self.critic(z_b), torch.ones_like(self.critic(z_b)))
-            loss = l_adv_a + l_adv_b
-
-            metrics = {
-                "l_adv": loss / 2,
-                "l_adv_a": l_adv_a,
-                "l_adv_b": l_adv_b,
-            }
-            for key, val in metrics.items():
-                self.log(f"train.{key}", val, prog_bar=False)
+        if self.critic_loss == "wasserstein":
+            loss = self.critic(z_a).mean() - self.critic(z_b).mean()
+        elif self.critic_loss == "classifier":
+            loss = F.binary_cross_entropy_with_logits(self.critic(z_a), torch.zeros_like(self.critic(z_a))) + \
+                    F.binary_cross_entropy_with_logits(self.critic(z_b), torch.ones_like(self.critic(z_b)))
+        self.vq.train()
         return loss
 
     def compute_bleu(self, batch, z_a, z_b):
@@ -383,6 +348,32 @@ class UnsupervisedTranslation(pl.LightningModule):
                 "bleu": (bleu_score_a["bleu"] + bleu_score_b["bleu"]) / 2,
             }
 
+    def log_metrics(self, metrics, prefix=""):
+        if prefix:
+            prefix += "."
+        for key, val in metrics.items():
+            if val is not None:
+                self.log(prefix + key, val, prog_bar=False)
+
+    def training_step(self, batch, batch_idx, optimizer_idx):
+        with torch.no_grad():
+            for param in self.critic.parameters():
+                param.clamp_(-0.01, 0.01)
+
+        if optimizer_idx == 0:
+            # train autoencoders for reconstruction
+            metrics = self.get_loss(batch)
+        elif optimizer_idx == 1:
+            # train autoencoders on backtranslation
+            metrics = self.compute_cycle_loss(batch)
+        elif optimizer_idx == 2:
+            # train critic to discriminate between z_a and z_b
+            metrics = {"loss": self.critic_loss(batch)}
+
+        loss = metrics["loss"]
+        self.log_metrics(metrics, prefix="train")
+        return loss
+
     def validation_step(self, batch, batch_idx):
         # compute batch metrics
         metrics = self.get_loss(batch)
@@ -390,7 +381,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         # compute loss for translations
         enc_a = self.encode_a(batch["src_labels"], attention_mask=batch["src_label_mask"])
         enc_b = self.encode_b(batch["tgt_labels"], attention_mask=batch["tgt_label_mask"])
-        z_a, z_b = enc_a["z"], enc_b["z"]
+        z_a, z_b = enc_a.z_q, enc_b.z_q
         logits_ab = self.decode_b(batch["tgt_labels"][:, :-1], z_a)
         logits_ba = self.decode_a(batch["src_labels"][:, :-1], z_b)
         l_rec_ab = F.cross_entropy(logits_ab.transpose(1, 2), batch["tgt_labels"][:, 1:], ignore_index=self.tokenizer_b.pad_token_id)
@@ -407,64 +398,27 @@ class UnsupervisedTranslation(pl.LightningModule):
             batch_idx < 16
         ):
             scores = self.compute_bleu(batch, z_a, z_b)
-            for key, val in scores.items():
-                self.log(f"eval.{key}", val, prog_bar=False)
+            self.log_metrics(scores, prefix="eval")
 
-        # log metrics
-        for key, val in metrics.items():
-                self.log(f"val.{key}", val, prog_bar=False)
+        self.log_metrics(metrics, prefix="val")
         return metrics
 
     def configure_optimizers(self):
-        optimizer_rec = torch.optim.AdamW(
-            [
-                {"params": self.autoencoder_a.parameters()},
-                {"params": self.autoencoder_b.parameters()},
-                {"params": self.lnorm.parameters()},
-            ],
-            lr=self.lr_rec,
-            weight_decay=0.01,
-        )
+        model_params = [
+            {"params": self.autoencoder_a.parameters()},
+            {"params": self.autoencoder_b.parameters()},
+            {"params": self.lnorm.parameters()},
+            {"params": self.vq.parameters()},
+        ]
+
+        optimizer_rec = torch.optim.AdamW(model_params, lr=self.lr_rec, weight_decay=0.01)
+        optimizer_bt = torch.optim.AdamW(model_params, lr=self.lr_bt, weight_decay=0.01)
         optimizer_critic = torch.optim.RMSprop(self.critic.parameters(), lr=self.lr_critic)
-        optimizer_enc = torch.optim.AdamW(
-            [
-                {"params": self.autoencoder_a.encoder.parameters()},
-                {"params": self.autoencoder_b.encoder.parameters()},
-            ],
-            lr=self.lr_enc,
-            weight_decay=0.01,
-        )
-        if self.lr_schedule == "constant":
-            # linear warmup with constant learning rate
-            scheduler = torch.optim.lr_scheduler.LambdaLR(
-                optimizer_rec,
-                lambda t: min(1.0, (t+1) / max(1, self.lr_warmup_steps)),
-            )
-        elif self.lr_schedule == "cosine":
-            # linear warmup with cosine decay to 0.1 * lr
-            scheduler = torch.optim.lr_scheduler.LambdaLR(
-                optimizer_rec,
-                lambda t: min(1, ((t+1) / max(1, self.lr_warmup_steps))) * (0.9 * (1 + math.cos(math.pi * t / self.lr_max_steps))/2 + 0.1),
-            )
-        else:
-            raise ValueError(f"Unknown lr_schedule {self.lr_schedule}")
+        
         return (
-            {
-                "optimizer": optimizer_rec,
-                "lr_scheduler": {
-                    "scheduler": scheduler,
-                    "interval": "step",
-                },
-                "frequency": 1,
-            },
-            {
-                "optimizer": optimizer_critic,
-                "frequency": self.n_critic_steps,
-            },
-            {
-                "optimizer": optimizer_enc,
-                "frequency": 1,
-            },
+            {"optimizer": optimizer_rec, "frequency": 1},
+            {"optimizer": optimizer_bt, "frequency": 1},
+            {"optimizer": optimizer_critic, "frequency": self.n_critic_steps},
         )
 
     def _translate(
@@ -480,7 +434,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         enc = self._encode(autoencoder_src.encoder, pooling_src, input_ids, attention_mask)
         return autoencoder_tgt.decoder.generate(
             input_ids=decoder_input_ids,
-            encoder_hidden_states=enc["z"],
+            encoder_hidden_states=enc.z_q,
             **kwargs,
         )
 
