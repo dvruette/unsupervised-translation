@@ -121,9 +121,8 @@ def main(config):
         limit_val_batches=config.training.val.limit_batches,
         val_check_interval=config.training.val.check_interval,
         gradient_clip_val=1.0,
-        resume_from_checkpoint=resume_from_checkpoint,
     )
-    trainer.fit(model, train_dl, val_dl)
+    trainer.fit(model, train_dl, val_dl, ckpt_path=resume_from_checkpoint)
 
 
 if __name__ == "__main__":
