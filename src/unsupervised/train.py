@@ -1,11 +1,13 @@
 import sys
 import os
 from multiprocessing import freeze_support
+from pathlib import Path
 
 import hydra
 import torch
 import pytorch_lightning as pl
 import dotenv
+from hydra.utils import to_absolute_path
 from omegaconf import OmegaConf
 from torch.utils.data import DataLoader
 
@@ -21,13 +23,32 @@ from src.data import get_dataset, DataCollatorForUnsupervisedMT
 
 @hydra.main(config_path="../config", config_name="unsupervised", version_base="1.1")
 def main(config):
-    logger = pl.loggers.wandb.WandbLogger(
-        entity="getsellerie",
-        project="unsupervised-translation",
-        group=config.group,
-        # convert config object to python dict with `OmegaConf.to_container(...)`
-        config={"config": OmegaConf.to_container(config, resolve=True)},
-    )
+    if config.resume_from_checkpoint is not None:
+        scratch_dir = Path(to_absolute_path(os.getenv("SCRATCH", ".")))
+        try:
+            run_dir = next((scratch_dir / "outputs").glob(f"**/{config.resume_from_checkpoint}"))
+            resume_from_checkpoint = next((run_dir / "checkpoints").glob("*.ckpt"))
+        except StopIteration:
+            raise ValueError(f"Could not find checkpoint for specified run: {config.resume_from_checkpoint}")
+
+        logger = pl.loggers.wandb.WandbLogger(
+            entity="getsellerie",
+            project="unsupervised-translation",
+            group=config.group,
+            config={"config": OmegaConf.to_container(config, resolve=True)},
+            resume=True,
+            id=config.resume_from_checkpoint,
+        )
+    else:
+        resume_from_checkpoint = None
+        logger = pl.loggers.wandb.WandbLogger(
+            entity="getsellerie",
+            project="unsupervised-translation",
+            group=config.group,
+            # convert config object to python dict with `OmegaConf.to_container(...)`
+            config={"config": OmegaConf.to_container(config, resolve=True)},
+        )
+
 
     # load model
 
@@ -99,6 +120,7 @@ def main(config):
         limit_val_batches=config.training.val.limit_batches,
         val_check_interval=config.training.val.check_interval,
         gradient_clip_val=1.0,
+        resume_from_checkpoint=resume_from_checkpoint,
     )
     trainer.fit(model, train_dl, val_dl)
 
