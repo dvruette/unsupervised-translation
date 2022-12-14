@@ -158,7 +158,7 @@ def main(config):
                 pred_tokens_a = model.autoencoder_a.decoder.generate(
                     input_ids=input_ids_a[:, :1],
                     encoder_hidden_states=enc_a["z"],
-                    max_new_tokens=config.max_new_tokens,
+                    max_new_tokens=config.generation.max_new_tokens,
                     eos_token_id=tokenizer_a.sep_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
@@ -173,7 +173,7 @@ def main(config):
                 pred_tokens_b = model.autoencoder_b.decoder.generate(
                     input_ids=input_ids_a[:, :1],
                     encoder_hidden_states=enc_b["z"],
-                    max_new_tokens=config.max_new_tokens,
+                    max_new_tokens=config.generation.max_new_tokens,
                     eos_token_id=tokenizer_b.eos_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
