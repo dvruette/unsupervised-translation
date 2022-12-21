@@ -57,6 +57,8 @@ def main(config):
         tokenizer_path_b=config.data.tokenizer_path_b,
         pooling=config.model.pooling,
         n_pools=config.model.n_pools,
+        d_model=config.model.d_model,
+        n_heads=config.model.n_heads,
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,
         n_codes=config.model.vq.n_codes,
@@ -66,7 +68,7 @@ def main(config):
         lr_bt=config.training.optimizer.lr_bt,
         critic_loss=config.training.critic_loss,
         n_critic_steps=config.training.optimizer.n_critic_steps,
-        beta_critic=config.training.beta_critic,
+        beta_adv=config.training.beta_adv,
         beta_vq=config.training.beta_vq,
         bleu_eval_freq=config.training.val.bleu_eval_freq,
     )
@@ -118,7 +120,6 @@ def main(config):
         accumulate_grad_batches=config.training.accumulate_batches,
         limit_val_batches=config.training.val.limit_batches,
         val_check_interval=config.training.val.check_interval,
-        gradient_clip_val=1.0,
     )
     trainer.fit(model, train_dl, val_dl, ckpt_path=resume_from_checkpoint)
 

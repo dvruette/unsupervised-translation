@@ -18,6 +18,8 @@ model:
   n_pools: 8
   latent_regularizer: critic
   use_latent_projection: false
+  d_model: 384
+  n_heads: 6
   num_encoder_layers: 4
   num_decoder_layers: 6
   vq:
@@ -27,8 +29,8 @@ training:
   batch_size: 64
   devices: 4
   accumulate_batches: 1
-  critic_loss: classifier
-  beta_critic: 0.25
+  critic_loss: wasserstein
+  beta_adv: 0.25
   beta_vq: 0.25
   optimizer:
     lr_rec: 1e-4
