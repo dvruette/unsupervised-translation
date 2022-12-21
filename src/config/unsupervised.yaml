@@ -20,6 +20,9 @@ model:
   use_latent_projection: false
   num_encoder_layers: 4
   num_decoder_layers: 6
+  vq:
+    n_codes: 2048
+    n_groups: 16
 training:
   batch_size: 64
   devices: 4

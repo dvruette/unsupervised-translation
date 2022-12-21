@@ -129,7 +129,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         n_pools: int = 1,
         d_model: int = 512,
         n_codes: int = 1024,
-        n_groups: int = 2,
+        n_groups: int = 16,
         beta_critic: float = 0.25,
         beta_vq: float = 0.1,
         lr_rec: float = 1e-4,
@@ -245,14 +245,15 @@ class UnsupervisedTranslation(pl.LightningModule):
         logits_a = self.decode_a(batch["src_labels"][:, :-1], z_a)
         logits_b = self.decode_b(batch["tgt_labels"][:, :-1], z_b)
 
-        l_adv = self.compute_critic_loss(batch, enc_a, enc_b)
+        # l_adv = self.compute_critic_loss(batch, enc_a, enc_b)
 
         # compute reconstruction loss
         l_rec_a = F.cross_entropy(logits_a.transpose(1, 2), batch["src_labels"][:, 1:], ignore_index=self.tokenizer_a.pad_token_id)
         l_rec_b = F.cross_entropy(logits_b.transpose(1, 2), batch["tgt_labels"][:, 1:], ignore_index=self.tokenizer_b.pad_token_id)
         l_rec = l_rec_a + l_rec_b
         # compute total loss
-        loss = l_rec - self.beta_critic*l_adv + self.beta_vq*(enc_a.loss + enc_b.loss)
+        # loss = l_rec - self.beta_critic*l_adv + self.beta_vq*(enc_a.loss + enc_b.loss)
+        loss = l_rec + self.beta_vq*(enc_a.loss + enc_b.loss)
 
         return {
             "loss": loss,
@@ -291,7 +292,7 @@ class UnsupervisedTranslation(pl.LightningModule):
             tokenizer_src=self.tokenizer_b,
             tokenizer_tgt=self.tokenizer_a,
         )
-        l_cycle = l_cycle_a + l_cycle_b + l_adv + self.beta_vq*(enc_a.loss + enc_b.loss)
+        l_cycle = l_cycle_a + l_cycle_b - self.beta_critic*l_adv + self.beta_vq*(enc_a.loss + enc_b.loss)
         
         return {
             "loss": l_cycle,
@@ -339,14 +340,18 @@ class UnsupervisedTranslation(pl.LightningModule):
                 max_new_tokens=64,
                 num_beams=4,
             )
-            bleu_score_a = _bleu_score(x_hat_a, batch["src_labels"], self.tokenizer_a)
-            bleu_score_b = _bleu_score(x_hat_b, batch["tgt_labels"], self.tokenizer_b)
+            try:
+                bleu_score_a = _bleu_score(x_hat_a, batch["src_labels"], self.tokenizer_a)
+                bleu_score_b = _bleu_score(x_hat_b, batch["tgt_labels"], self.tokenizer_b)
 
-            return {
-                "bleu_ba": bleu_score_a["bleu"],
-                "bleu_ab": bleu_score_b["bleu"],
-                "bleu": (bleu_score_a["bleu"] + bleu_score_b["bleu"]) / 2,
-            }
+                return {
+                    "bleu_ba": bleu_score_a["bleu"],
+                    "bleu_ab": bleu_score_b["bleu"],
+                    "bleu": (bleu_score_a["bleu"] + bleu_score_b["bleu"]) / 2,
+                }
+            except FileNotFoundError as e:
+                print("WARNING: Bleu score could not be computed because script was not found:", e)
+                return {}
 
     def log_metrics(self, metrics, prefix=""):
         if prefix:
@@ -368,7 +373,11 @@ class UnsupervisedTranslation(pl.LightningModule):
             metrics = self.compute_cycle_loss(batch)
         elif optimizer_idx == 2:
             # train critic to discriminate between z_a and z_b
-            metrics = {"loss": self.critic_loss(batch)}
+            loss = self.compute_critic_loss(batch)
+            metrics = {
+                "loss": loss,
+                "l_critic": loss,
+            }
 
         loss = metrics["loss"]
         self.log_metrics(metrics, prefix="train")

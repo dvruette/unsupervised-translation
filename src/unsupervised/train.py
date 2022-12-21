@@ -59,6 +59,8 @@ def main(config):
         n_pools=config.model.n_pools,
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,
+        n_codes=config.model.vq.n_codes,
+        n_groups=config.model.vq.n_groups,
         lr_rec=config.training.optimizer.lr_rec,
         lr_critic=config.training.optimizer.lr_critic,
         lr_bt=config.training.optimizer.lr_bt,
