@@ -105,19 +105,19 @@ def main(config):
     callbacks = [lr_monitor]
 
     if config.training.strategy == "ddp":
-        strategy = pl.strategies.DDPStrategy(find_unused_parameters=False)
+        strategy = pl.strategies.DDPStrategy(find_unused_parameters=True)
     else:
         strategy = config.training.strategy
 
     trainer = pl.Trainer(
         accelerator="auto",
+        num_nodes=1,
         devices=config.training.devices if torch.cuda.is_available() else None,
         strategy=strategy if torch.cuda.device_count() > 1 else None,
         callbacks=callbacks,
         max_steps=config.training.max_steps,
         max_epochs=config.training.max_epochs,
         logger=logger,
-        accumulate_grad_batches=config.training.accumulate_batches,
         limit_val_batches=config.training.val.limit_batches,
         val_check_interval=config.training.val.check_interval,
     )

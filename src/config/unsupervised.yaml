@@ -11,7 +11,7 @@ data:
   stream: False
   train_split: train
   val_split: validation
-  num_workers: 8
+  num_workers: 2
 model:
   use_oracle: True
   pooling: attention
@@ -21,14 +21,13 @@ model:
   d_model: 384
   n_heads: 6
   num_encoder_layers: 4
-  num_decoder_layers: 6
+  num_decoder_layers: 4
   vq:
     n_codes: 2048
     n_groups: 16
 training:
-  batch_size: 64
+  batch_size: 16
   devices: 4
-  accumulate_batches: 1
   critic_loss: wasserstein
   beta_adv: 0.25
   beta_vq: 0.25
@@ -40,7 +39,7 @@ training:
   max_steps: 100000
   max_epochs: 50
   max_seq_len: 128
-  strategy: dp
+  strategy: ddp
   val:
     check_interval: 512
     limit_batches: 128

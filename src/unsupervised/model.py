@@ -260,7 +260,7 @@ class UnsupervisedTranslation(pl.LightningModule):
             prefix += "."
         for key, val in metrics.items():
             if val is not None:
-                self.log(prefix + key, val, prog_bar=False)
+                self.log(prefix + key, val, prog_bar=False, sync_dist=True)
 
     def _backtranslate(self, z, decoder_tgt, tokenizer_tgt):
         with torch.no_grad():
@@ -333,65 +333,72 @@ class UnsupervisedTranslation(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         opt_rec, opt_bt, opt_critic = self.optimizers()
 
-        if batch_idx % 2 == 0:
-            # train autoencoders for reconstruction
-            metrics = self.compute_rec_loss(batch)
-            loss = metrics["loss"]
+        # if batch_idx % 2 == 0:
+        # train autoencoders for reconstruction
+        metrics = self.compute_rec_loss(batch)
+        loss = metrics["loss"]
 
-            opt_rec.zero_grad()
-            self.manual_backward(loss)
-            self.clip_gradients(opt_rec, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
-            opt_rec.step()
-        else:
-            (z_a, y_hat_a, attention_mask_a), (z_b, y_hat_b, attention_mask_b) = self.compute_backtranslations(batch)
+        opt_rec.zero_grad()
+        self.manual_backward(loss)
+        self.clip_gradients(opt_rec, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
+        opt_rec.step()
+        # else:
+        (z_a, y_hat_a, attention_mask_a), (z_b, y_hat_b, attention_mask_b) = self.compute_backtranslations(batch)
 
-            # train critic to discriminate between (z_a, z_hat_b) and (z_b, z_hat_a)
-            self.vq.eval()
-            enc_hat_a = self.encode_a(y_hat_a, attention_mask=attention_mask_a)
-            enc_hat_b = self.encode_b(y_hat_b, attention_mask=attention_mask_b)
-            self.vq.train()
-            l_critic_a = self.compute_critic_loss(z_a=z_a, z_b=enc_hat_b.z_q)
-            l_critic_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=z_b)
-            critic_loss = l_critic_a + l_critic_b
-            
-            opt_critic.zero_grad()
-            self.manual_backward(critic_loss)
-            opt_critic.step()
+        # train critic to discriminate between (z_a, z_hat_b) and (z_b, z_hat_a)
+        self.vq.eval()
+        enc_hat_a = self.encode_a(y_hat_a, attention_mask=attention_mask_a)
+        enc_hat_b = self.encode_b(y_hat_b, attention_mask=attention_mask_b)
+        self.vq.train()
+        l_critic_a = self.compute_critic_loss(z_a=z_a, z_b=enc_hat_b.z_q)
+        l_critic_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=z_b)
+        critic_loss = l_critic_a + l_critic_b
+        
+        opt_critic.zero_grad()
+        self.manual_backward(critic_loss)
+        opt_critic.step()
 
-            with torch.no_grad():
-                for param in self.critic.parameters():
-                    param.clamp_(-0.01, 0.01)
+        with torch.no_grad():
+            for param in self.critic.parameters():
+                param.clamp_(-0.01, 0.01)
 
-            # train autoencoders on backtranslation
-            enc_hat_a = self.encode_a(y_hat_a, attention_mask=attention_mask_a)
-            enc_hat_b = self.encode_b(y_hat_b, attention_mask=attention_mask_b)
-            l_cycle_a = self.compute_cycle_loss(y_hat_b, attention_mask_a, batch["src_labels"], self.encode_b, self.decode_a, self.tokenizer_a)
-            l_cycle_b = self.compute_cycle_loss(y_hat_a, attention_mask_b, batch["tgt_labels"], self.encode_a, self.decode_b, self.tokenizer_b)
-            l_adv_a = self.compute_critic_loss(z_a=z_a.detach(), z_b=enc_hat_b.z_q)
-            l_adv_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=z_b.detach())
-            l_vq_a = enc_hat_a.loss
-            l_vq_b = enc_hat_b.loss
-            bt_loss = l_cycle_a + l_cycle_b + self.beta_adv*(l_adv_a + l_adv_b) + self.beta_vq*(l_vq_a + l_vq_b)
+        # train autoencoders on backtranslation
+        enc_a = self.encode_a(batch["src_labels"], attention_mask=batch["src_label_mask"])
+        enc_b = self.encode_b(batch["tgt_labels"], attention_mask=batch["tgt_label_mask"])
+        enc_hat_a = self.encode_a(y_hat_a, attention_mask=attention_mask_a)
+        enc_hat_b = self.encode_b(y_hat_b, attention_mask=attention_mask_b)
+        l_cycle_a = self.compute_cycle_loss(y_hat_b, attention_mask_b, batch["src_labels"], self.encode_b, self.decode_a, self.tokenizer_a)
+        l_cycle_b = self.compute_cycle_loss(y_hat_a, attention_mask_a, batch["tgt_labels"], self.encode_a, self.decode_b, self.tokenizer_b)
+        # l_adv_a = self.compute_critic_loss(z_a=z_a.detach(), z_b=enc_hat_b.z_q)
+        # l_adv_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=z_b.detach())
+        l_adv_a = self.compute_critic_loss(z_a=enc_a.z_q, z_b=enc_hat_b.z_q)
+        l_adv_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=enc_b.z_q)
+        l_vq_a = (enc_a.loss + enc_hat_a.loss) / 2
+        l_vq_b = (enc_b.loss + enc_hat_b.loss) / 2
+        l_vq_a = enc_hat_a.loss
+        l_vq_b = enc_hat_b.loss
+        bt_loss = l_cycle_a + l_cycle_b + self.beta_adv*(l_adv_a + l_adv_b) + self.beta_vq*(l_vq_a + l_vq_b)
 
-            opt_bt.zero_grad()
-            self.manual_backward(bt_loss)
-            self.clip_gradients(opt_bt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
-            opt_bt.step()
+        opt_bt.zero_grad()
+        self.manual_backward(bt_loss)
+        self.clip_gradients(opt_bt, gradient_clip_val=1.0, gradient_clip_algorithm="norm")
+        opt_bt.step()
 
-            metrics = {
-                "l_critic": (l_critic_a + l_critic_b) / 2,
-                "l_crit_a": l_critic_a,
-                "l_crit_b": l_critic_b,
-                "l_cycle": (l_cycle_a + l_cycle_b) / 2,
-                "l_cycle_a": l_cycle_a,
-                "l_cycle_b": l_cycle_b,
-                "l_adv": (l_adv_a + l_adv_b) / 2,
-                "l_adv_a": l_adv_a,
-                "l_adv_b": l_adv_b,
-                "l_vq": (l_vq_a + l_vq_b) / 2,
-                "l_vq_a": l_vq_a,
-                "l_vq_b": l_vq_b,
-            }
+        metrics["l_vq"] += (l_vq_a + l_vq_b) / 2
+        metrics["l_vq_a"] += l_vq_a
+        metrics["l_vq_b"] += l_vq_b
+        metrics = {
+            "l_critic": (l_critic_a + l_critic_b) / 2,
+            "l_critic_a": l_critic_a,
+            "l_critic_b": l_critic_b,
+            "l_cycle": (l_cycle_a + l_cycle_b) / 2,
+            "l_cycle_a": l_cycle_a,
+            "l_cycle_b": l_cycle_b,
+            "l_adv": (l_adv_a + l_adv_b) / 2,
+            "l_adv_a": l_adv_a,
+            "l_adv_b": l_adv_b,
+            **metrics
+        }
 
         self.log_metrics(metrics, prefix="train")
 
