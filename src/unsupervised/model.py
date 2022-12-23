@@ -58,6 +58,8 @@ class Critic(nn.Module):
     def forward(self, x):
         # input shape: (batch_size, n_pools, d_model)
         # output shape: (batch_size,)
+        assert x.shape[1] == self.n_pools
+        assert x.shape[2] == self.d_model
         x = self.proj(x)
         x = x.view(-1, self.n_pools * self.d_proj)
         x = self.fc(x)
@@ -195,7 +197,7 @@ class UnsupervisedTranslation(pl.LightningModule):
 
         self.lnorm = nn.LayerNorm(d_model)
         self.vq = VectorQuantizeEMA(d_model, n_codes, n_groups)
-        self.critic = Critic(d_model, n_pools)
+        self.critic = Critic(d_model, 2*n_pools)
 
 
     def _encode(self, encoder: BertModel, pooling: nn.Module, *args, **kwargs):
@@ -287,13 +289,25 @@ class UnsupervisedTranslation(pl.LightningModule):
         return y_hat, attention_mask
 
     def compute_critic_loss(self, z_a, z_b):
-        if self.critic_loss == "wasserstein":
-            loss = self.critic(z_a).mean() - self.critic(z_b).mean()
-        elif self.critic_loss == "classifier":
-            loss = F.binary_cross_entropy_with_logits(self.critic(z_a), torch.zeros_like(self.critic(z_a))) + \
-                   F.binary_cross_entropy_with_logits(self.critic(z_b), torch.ones_like(self.critic(z_b)))
-        elif self.critic_loss == "l2":
-            loss = F.mse_loss(z_a, z_b)
+        labels = torch.randint(2, (z_a.size(0),), device=self.device)
+        # label = 0 => normal order (z_a, z_b)
+        # label = 1 => reverse order (z_b, z_a)
+        x0 = torch.where(labels[:, None, None].bool(), z_b, z_a)
+        x1 = torch.where(labels[:, None, None].bool(), z_a, z_b)
+        xs = torch.cat([x0, x1], dim=1)
+
+        logits = self.critic(xs)
+        loss = F.binary_cross_entropy_with_logits(logits, labels.float())
+
+        # if self.critic_loss == "wasserstein":
+        #     loss = self.critic(z_a).mean() - self.critic(z_b).mean()
+        # elif self.critic_loss == "classifier":
+        #     logits_a = self.critic(z_a)
+        #     logits_b = self.critic(z_b)
+        #     loss = F.binary_cross_entropy_with_logits(logits_a, torch.zeros_like(logits_a)) + \
+        #            F.binary_cross_entropy_with_logits(logits_b, torch.ones_like(logits_b))
+        # elif self.critic_loss == "l2":
+        #     loss = F.mse_loss(z_a, z_b)
         return loss
 
     def compute_rec_loss(self, batch):

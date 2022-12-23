@@ -7,7 +7,7 @@ data:
   dataset_name: wmt14
   language_pair: de-en
   batch_size: 4
-  max_batches: 8
+  max_batches: 16
   num_workers: 8
   split: validation
 generation:
