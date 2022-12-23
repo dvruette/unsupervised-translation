@@ -22,6 +22,7 @@ model:
   n_heads: 6
   num_encoder_layers: 4
   num_decoder_layers: 4
+  do_vq: true
   vq:
     n_codes: 2048
     n_groups: 16

@@ -8,7 +8,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 from transformers import BertConfig, BertModel, BertLMHeadModel, BertTokenizer
 
-from src.unsupervised.vq_embed import VectorQuantizeEMA
+from src.unsupervised.vq_embed import VectorQuantizeEMA, VQOutput
 from src.unsupervised.pooling import AttentionPooling, MaxPooling, MeanPooling
 
 
@@ -123,6 +123,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         tokenizer_path_a: str = "bert-base-cased",
         tokenizer_path_b: str = "deepset/gbert-base",
         do_backtranslation: bool = True,
+        do_vq: bool = True,
         num_encoder_layers: int = 4,
         num_decoder_layers: int = 6,
         pooling: Literal["mean", "max", "attention"] = "max",
@@ -134,7 +135,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         beta_adv: float = 0.25,
         beta_vq: float = 0.1,
         lr_rec: float = 1e-4,
-        lr_critic: float = 2e-5,
+        lr_critic: float = 1e-4,
         lr_bt: float = 1e-4,
         critic_loss: Literal["wasserstein", "classifier"] = "wasserstein",
         n_critic_steps: int = 5,
@@ -145,6 +146,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.automatic_optimization = False
 
         self.do_backtranslation = do_backtranslation
+        self.do_vq = do_vq
         self.pooling = pooling
         self.n_pools = n_pools
         self.n_codes = n_codes
@@ -206,7 +208,10 @@ class UnsupervisedTranslation(pl.LightningModule):
         # layer norm
         z = self.lnorm(z)
         # vector quantize
-        return self.vq(z)
+        if self.do_vq:
+            return self.vq(z)
+        else:
+            return VQOutput(z_q=z, z=z, codes=None, loss=0)
 
     def _decode(self, decoder: CustomBertLMHeadModel, input_ids: torch.Tensor, z: torch.Tensor, **kwargs):
         decoder_out = decoder(input_ids, encoder_hidden_states=z, **kwargs)
@@ -262,6 +267,9 @@ class UnsupervisedTranslation(pl.LightningModule):
             if val is not None:
                 self.log(prefix + key, val, prog_bar=False, sync_dist=True)
 
+    def _beta_adv(self, t):
+        return self.beta_adv * max(0, min(1, (t - 1000) / 1000))
+
     def _backtranslate(self, z, decoder_tgt, tokenizer_tgt):
         with torch.no_grad():
             input_ids = torch.zeros((z.size(0), 1), dtype=torch.int32, device=self.device).fill_(tokenizer_tgt.cls_token_id)
@@ -284,6 +292,8 @@ class UnsupervisedTranslation(pl.LightningModule):
         elif self.critic_loss == "classifier":
             loss = F.binary_cross_entropy_with_logits(self.critic(z_a), torch.zeros_like(self.critic(z_a))) + \
                    F.binary_cross_entropy_with_logits(self.critic(z_b), torch.ones_like(self.critic(z_b)))
+        elif self.critic_loss == "l2":
+            loss = F.mse_loss(z_a, z_b)
         return loss
 
     def compute_rec_loss(self, batch):
@@ -333,6 +343,8 @@ class UnsupervisedTranslation(pl.LightningModule):
     def training_step(self, batch, batch_idx):
         opt_rec, opt_bt, opt_critic = self.optimizers()
 
+        t = self.global_step
+
         # if batch_idx % 2 == 0:
         # train autoencoders for reconstruction
         metrics = self.compute_rec_loss(batch)
@@ -346,10 +358,11 @@ class UnsupervisedTranslation(pl.LightningModule):
         (z_a, y_hat_a, attention_mask_a), (z_b, y_hat_b, attention_mask_b) = self.compute_backtranslations(batch)
 
         # train critic to discriminate between (z_a, z_hat_b) and (z_b, z_hat_a)
-        self.vq.eval()
-        enc_hat_a = self.encode_a(y_hat_a, attention_mask=attention_mask_a)
-        enc_hat_b = self.encode_b(y_hat_b, attention_mask=attention_mask_b)
-        self.vq.train()
+        with torch.no_grad():
+            self.vq.eval()
+            enc_hat_a = self.encode_a(y_hat_a, attention_mask=attention_mask_a)
+            enc_hat_b = self.encode_b(y_hat_b, attention_mask=attention_mask_b)
+            self.vq.train()
         l_critic_a = self.compute_critic_loss(z_a=z_a, z_b=enc_hat_b.z_q)
         l_critic_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=z_b)
         critic_loss = l_critic_a + l_critic_b
@@ -363,21 +376,23 @@ class UnsupervisedTranslation(pl.LightningModule):
                 param.clamp_(-0.01, 0.01)
 
         # train autoencoders on backtranslation
-        enc_a = self.encode_a(batch["src_labels"], attention_mask=batch["src_label_mask"])
-        enc_b = self.encode_b(batch["tgt_labels"], attention_mask=batch["tgt_label_mask"])
         enc_hat_a = self.encode_a(y_hat_a, attention_mask=attention_mask_a)
         enc_hat_b = self.encode_b(y_hat_b, attention_mask=attention_mask_b)
         l_cycle_a = self.compute_cycle_loss(y_hat_b, attention_mask_b, batch["src_labels"], self.encode_b, self.decode_a, self.tokenizer_a)
         l_cycle_b = self.compute_cycle_loss(y_hat_a, attention_mask_a, batch["tgt_labels"], self.encode_a, self.decode_b, self.tokenizer_b)
         # l_adv_a = self.compute_critic_loss(z_a=z_a.detach(), z_b=enc_hat_b.z_q)
         # l_adv_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=z_b.detach())
+        # l_vq_a = enc_hat_a.loss
+        # l_vq_b = enc_hat_b.loss
+
+        enc_a = self.encode_a(batch["src_labels"], attention_mask=batch["src_label_mask"])
+        enc_b = self.encode_b(batch["tgt_labels"], attention_mask=batch["tgt_label_mask"])
         l_adv_a = self.compute_critic_loss(z_a=enc_a.z_q, z_b=enc_hat_b.z_q)
         l_adv_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=enc_b.z_q)
         l_vq_a = (enc_a.loss + enc_hat_a.loss) / 2
         l_vq_b = (enc_b.loss + enc_hat_b.loss) / 2
-        l_vq_a = enc_hat_a.loss
-        l_vq_b = enc_hat_b.loss
-        bt_loss = l_cycle_a + l_cycle_b + self.beta_adv*(l_adv_a + l_adv_b) + self.beta_vq*(l_vq_a + l_vq_b)
+        
+        bt_loss = l_cycle_a + l_cycle_b - self._beta_adv(t)*(l_adv_a + l_adv_b) + self.beta_vq*(l_vq_a + l_vq_b)
 
         opt_bt.zero_grad()
         self.manual_backward(bt_loss)

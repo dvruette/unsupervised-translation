@@ -55,6 +55,7 @@ def main(config):
     model = UnsupervisedTranslation(
         tokenizer_path_a=config.data.tokenizer_path_a,
         tokenizer_path_b=config.data.tokenizer_path_b,
+        do_vq=config.model.do_vq,
         pooling=config.model.pooling,
         n_pools=config.model.n_pools,
         d_model=config.model.d_model,
