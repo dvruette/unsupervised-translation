@@ -40,7 +40,7 @@ class DataCollatorForUnsupervisedMT:
         src_key: str = "de",
         tgt_key: str = "en",
         max_seq_len: int = 512,
-        p_del: float = 0.1,
+        p_del: float = 0.15,
         p_perm: float = 0.1,
         k_perm: int = 2,
     ):
@@ -57,12 +57,12 @@ class DataCollatorForUnsupervisedMT:
         words = text.split(" ")
         if random.random() < 0.9:
             # each word has a 10% chance of being deleted
-            words = [word for word in words if random.random() > self.p_del]
             for k in range(self.k_perm):
                 # each bigram has a 10% chance of being permuted
                 for i, j in zip(range(k % 2, len(words) - 1, 2), range(k % 2 + 1, len(words), 2)):
                     if random.random() < self.p_perm:
                         words[i], words[j] = words[j], words[i]
+            words = [word for word in words if random.random() > self.p_del]
         text = " ".join(words)
         return text
 
