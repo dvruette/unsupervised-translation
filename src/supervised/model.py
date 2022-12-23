@@ -55,12 +55,13 @@ class AutoEncoder(nn.Module):
 
 
 class SupervisedTranslation(pl.LightningModule):
-    def __init__(self, autoencoder: AutoEncoder, bleu_eval_freq: int, lr: float = 1e-4 , encoder_tokenizer_path: str = "bert-base-cased", decoder_tokenizer_path: str = "deepset/gbert-base"):
+    def __init__(self, autoencoder: AutoEncoder, bleu_eval_freq: int, num_beams: int = 4, lr: float = 1e-4 , encoder_tokenizer_path: str = "bert-base-cased", decoder_tokenizer_path: str = "deepset/gbert-base"):
         super().__init__()
         self.save_hyperparameters()
         self.autoencoder = autoencoder
         self.lr = lr
         self.bleu_eval_freq = bleu_eval_freq
+        self.num_beams = num_beams
         self.src_tokenizer = BertTokenizer.from_pretrained(encoder_tokenizer_path)
         self.tgt_tokenizer = BertTokenizer.from_pretrained(decoder_tokenizer_path)
 
@@ -99,13 +100,15 @@ class SupervisedTranslation(pl.LightningModule):
             and batch_idx < 16
             ):
             with torch.no_grad():
+                input_ids = torch.repeat_interleave(batch["input_ids"], self.num_beams, dim=0)
+                attention_mask = torch.repeat_interleave(batch["attention_mask"], self.num_beams, dim=0)
 
                 pred_tokens = self.autoencoder.generate(
-                    input_ids=batch["input_ids"],
-                    attention_mask=batch["attention_mask"],
+                    input_ids=input_ids,
+                    attention_mask=attention_mask,
                     decoder_input_ids=batch["labels"][:,:1],
                     max_new_tokens=64,
-                    num_beams=1,
+                    num_beams=self.num_beams,
                     do_sample=False
                 )
 

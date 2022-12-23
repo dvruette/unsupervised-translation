@@ -17,7 +17,8 @@ training:
   learning_rate: 0.0001
   max_steps: 100000
   max_epochs: 50
+  num_beams: 4
   val:
-    check_interval: 256
-    limit_batches: 256
-    bleu_eval_freq: 4096
+    check_interval: 512
+    limit_batches: 512
+    bleu_eval_freq: 2048
