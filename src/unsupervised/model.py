@@ -320,7 +320,7 @@ class UnsupervisedTranslation(pl.LightningModule):
             "l_vq": (enc_a.loss + enc_b.loss) / 2,
             "l_vq_a": enc_a.loss,
             "l_vq_b": enc_b.loss,
-            "entropy": (enc_a.entropy + enc_b.entropy) / 2 if self.training else None,
+            "entropy": (enc_a.entropy + enc_b.entropy) / 2 if enc_a.entropy is not None else None,
         }
 
     def compute_backtranslations(self, batch):
@@ -387,8 +387,8 @@ class UnsupervisedTranslation(pl.LightningModule):
 
         enc_a = self.encode_a(batch["src_labels"], attention_mask=batch["src_label_mask"])
         enc_b = self.encode_b(batch["tgt_labels"], attention_mask=batch["tgt_label_mask"])
-        l_adv_a = self.compute_critic_loss(z_a=enc_a.z_q, z_b=enc_hat_b.z_q)
-        l_adv_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=enc_b.z_q)
+        l_adv_a = self.compute_critic_loss(z_a=enc_a.z_q.detach(), z_b=enc_hat_b.z_q)
+        l_adv_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=enc_b.z_q.detach())
         l_vq_a = (enc_a.loss + enc_hat_a.loss) / 2
         l_vq_b = (enc_b.loss + enc_hat_b.loss) / 2
         
