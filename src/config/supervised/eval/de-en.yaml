@@ -1,0 +1,27 @@
+hydra:
+  run:
+    dir: ${oc.env:SCRATCH,.}/outputs/supervised/${now:%Y-%m-%d}/${now:%H-%M-%S}
+
+checkpoint_path: /cluster/scratch/jarjum/outputs/supervised/2022-12-23/14-59-31/unsupervised-translation/110a6dxj/checkpoints/epoch=0-step=54784.ckpt
+
+data:
+  dataset_name: wmt14
+  language_pair: de-en
+  stream: False
+  train_split: train
+  val_split: validation
+  num_workers: 1
+
+training:
+  batch_size: 64
+  gradient_accumulation: 1
+  max_seq_len: 256
+  learning_rate: 0.0001
+  max_steps: 100000
+  max_epochs: 50
+  strategy: ddp
+  num_beams: 4
+  val:
+    check_interval: 256
+    limit_batches: 256
+    bleu_eval_freq: 256

@@ -9,6 +9,9 @@ from torchmetrics.text import bleu
 import transformers
 from transformers import BertConfig, BertModel, BertLMHeadModel, BertTokenizer
 
+import wandb
+import random
+
 class CustomBertLMHeadModel(BertLMHeadModel):
     def prepare_inputs_for_generation(self, *args, encoder_hidden_states=None, **kwargs):
         inputs = super().prepare_inputs_for_generation(*args, **kwargs)
@@ -89,17 +92,9 @@ class SupervisedTranslation(pl.LightningModule):
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self.get_loss(batch)
-
-        metrics = {"loss": loss}
-
-        if (
-            self.global_step % self.bleu_eval_freq == 0
-            and self.global_step != 0
-            and self.global_rank == 0
-            and batch_idx < 16
-            ):
-            with torch.no_grad():
+        metrics = {}
+        with torch.no_grad():
+            if (self.global_step % self.bleu_eval_freq == 0 and self.global_step > 0):
                 input_ids = torch.repeat_interleave(batch["input_ids"], self.num_beams, dim=0)
                 attention_mask = torch.repeat_interleave(batch["attention_mask"], self.num_beams, dim=0)
 
@@ -107,7 +102,7 @@ class SupervisedTranslation(pl.LightningModule):
                     input_ids=input_ids,
                     attention_mask=attention_mask,
                     decoder_input_ids=batch["labels"][:,:1],
-                    max_new_tokens=64,
+                    max_new_tokens=256,
                     num_beams=self.num_beams,
                     do_sample=False
                 )
@@ -121,14 +116,50 @@ class SupervisedTranslation(pl.LightningModule):
                 if len(filtered) > 0:
                     xs, ys = tuple(zip(*filtered))
                     bleu = evaluate.load("bleu")
-                    bleu_score = bleu.compute(predictions=xs, references=ys)
+                    bleu_score = bleu.compute(predictions=xs, references=ys)["bleu"]
+                      
+                self.log("val", {"bleu": bleu_score}, prog_bar=False, sync_dist=True)
 
-                self.log("eval", {"bleu": bleu_score["bleu"]}, prog_bar=False)
-        self.log("val", metrics, prog_bar=False, sync_dist=True)
-        return metrics
+        loss = self.get_loss(batch)
+        self.log("val", {"loss": loss}, prog_bar=False, sync_dist=True)
+        return {"loss": loss} 
+
+    def test_step(self, batch, batch_idx):
+        print("Hello, test step")
+        with torch.no_grad():
+            input_ids = torch.repeat_interleave(batch["input_ids"], self.num_beams, dim=0)
+            attention_mask = torch.repeat_interleave(batch["attention_mask"], self.num_beams, dim=0)
+
+            print("Test Step", batch_idx)
+            pred_tokens = self.autoencoder.generate(
+                input_ids=input_ids,
+                attention_mask=attention_mask,
+                decoder_input_ids=batch["labels"][:,:1],
+                max_new_tokens=256,
+                num_beams=self.num_beams,
+                do_sample=False
+            )
+
+            inputs = self.src_tokenizer.batch_decode(batch["input_ids"], skip_special_tokens=True)
+            translations= self.tgt_tokenizer.batch_decode(pred_tokens, skip_special_tokens=True)
+
+            pred = [(x.strip(), y.strip()) for x, y in zip(inputs, translations) if x.strip() and y.strip()]
+
+            self.log("test_step", batch_idx, on_step=True, prog_bar=True, logger=False)
+            return pred
+    
+
+    def test_epoch_end(self, test_step_outputs):
+        pred = [item for sublist in l for item in sublist]
+        
+        xs, ys = tuple(zip(*pred))
+        bleu = evaluate.load("bleu")
+        
+        scores = bleu.compute(predictions=xs, references=ys)
+        self.log(scores)
 
     def configure_optimizers(self):
-        optimizer = torch.optim.AdamW(self.parameters(), self.lr)
+        optimizer = torch.optim.AdamW(self.parameters(), self.lr, weight_decay=0.01)
         return optimizer
 
 

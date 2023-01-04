@@ -8,7 +8,7 @@ data:
   stream: False
   train_split: train
   val_split: validation
-  num_workers: 8
+  num_workers: 1
 
 training:
   batch_size: 64
@@ -17,8 +17,9 @@ training:
   learning_rate: 0.0001
   max_steps: 100000
   max_epochs: 50
+  strategy: ddp
   num_beams: 4
   val:
-    check_interval: 512
-    limit_batches: 512
-    bleu_eval_freq: 2048
+    check_interval: 256
+    limit_batches: 256
+    bleu_eval_freq: 256
