@@ -63,7 +63,6 @@ def train(config):
         beta_ot=config.training.beta_ot,
         beta_ce=config.training.beta_ce,
         bleu_eval_freq=config.training.val.bleu_eval_freq,
-        max_steps=config.training.max_steps,
     )
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
 
