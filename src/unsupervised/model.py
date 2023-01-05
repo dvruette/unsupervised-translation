@@ -296,7 +296,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         y_hat_b, attention_mask_b = self._backtranslate(z_a, self.autoencoder_b.decoder, self.tokenizer_b)
         return (z_a, y_hat_a, attention_mask_a), (z_b, y_hat_b, attention_mask_b)
 
-    def training_step(self, batch, batch_idx):
+    def get_loss(self, batch):
         z_a = self.encode_a(batch["src_input_ids"], attention_mask=batch["src_attention_mask"])
         z_b = self.encode_b(batch["tgt_input_ids"], attention_mask=batch["tgt_attention_mask"])
         shape_a = z_a.shape
@@ -335,10 +335,10 @@ class UnsupervisedTranslation(pl.LightningModule):
 
         loss = l_rec + jdot_loss
 
-        metrics = {
+        return {
             "loss": loss,
             "ot_loss": ot_loss,
-            "ce_loss": ce_loss,
+            "ce_loss": ce_loss / 2,
             "src_ce_loss": src_ce_loss,
             "tgt_ce_loss": tgt_ce_loss,
             "l_rec": l_rec / 2,
@@ -346,12 +346,14 @@ class UnsupervisedTranslation(pl.LightningModule):
             "l_rec_b": l_rec_b,
         }
 
+    def training_step(self, batch, batch_idx):
+        metrics = self.get_loss(batch)
         self.log_metrics(metrics, prefix="train")
-        return loss
+        return metrics["loss"]
 
     def validation_step(self, batch, batch_idx):
         # compute batch metrics
-        metrics = self.compute_rec_loss(batch)
+        metrics = self.get_loss(batch)
 
         # compute loss for translations
         enc_a = self.encode_a(batch["src_labels"], attention_mask=batch["src_label_mask"])

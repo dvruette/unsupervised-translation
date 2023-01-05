@@ -1,7 +1,7 @@
 hydra:
   run:
     dir: ${oc.env:SCRATCH,.}/outputs/unsupervised/${now:%Y-%m-%d}/${now:%H-%M-%S}
-group: unsupervised
+group: jdot
 resume_from_checkpoint: null
 data:
   dataset_name: wmt14
@@ -20,15 +20,16 @@ model:
   num_encoder_layers: 6
   num_decoder_layers: 6
 training:
-  batch_size: 16
+  batch_size: 32
+  accumulate_batches: 2
   devices: 4
-  beta_ot: 1e-3
-  beta_ce: 1e-4
+  beta_ot: 5e-3
+  beta_ce: 0.5
   optimizer:
     lr: 1e-4
-  max_steps: 100000
+  max_steps: 400_000
   max_epochs: 50
-  max_seq_len: 128
+  max_seq_len: 64
   strategy: ddp
   val:
     check_interval: 512

@@ -115,6 +115,7 @@ def main(config):
         logger=logger,
         limit_val_batches=config.training.val.limit_batches,
         val_check_interval=config.training.val.check_interval,
+        accumulate_grad_batches=config.training.accumulate_batches,
     )
     trainer.fit(model, train_dl, val_dl, ckpt_path=resume_from_checkpoint)
 
