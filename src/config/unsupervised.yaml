@@ -17,8 +17,8 @@ model:
   n_pools: 1
   d_model: 256
   n_heads: 4
-  num_encoder_layers: 4
-  num_decoder_layers: 4
+  num_encoder_layers: 6
+  num_decoder_layers: 6
 training:
   batch_size: 16
   devices: 4
