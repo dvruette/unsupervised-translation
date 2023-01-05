@@ -20,9 +20,7 @@ dotenv.load_dotenv()
 from src.unsupervised.model import UnsupervisedTranslation
 from src.data import get_dataset, DataCollatorForUnsupervisedMT
 
-
-@hydra.main(config_path="../config", config_name="unsupervised", version_base="1.1")
-def main(config):
+def train(config):
     if config.resume_from_checkpoint is not None:
         scratch_dir = Path(to_absolute_path(os.getenv("SCRATCH", ".")))
         try:
@@ -118,6 +116,11 @@ def main(config):
         accumulate_grad_batches=config.training.accumulate_batches,
     )
     trainer.fit(model, train_dl, val_dl, ckpt_path=resume_from_checkpoint)
+
+
+@hydra.main(config_path="../config", config_name="unsupervised", version_base="1.1")
+def main(config):
+    train(config)
 
 
 if __name__ == "__main__":
