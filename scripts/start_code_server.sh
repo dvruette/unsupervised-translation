@@ -3,8 +3,8 @@
 
 LOCAL_PORT=8899
 USER=$1
-WAITING_TIME_INTERVAL=30
-RUNTIME=12:00
+WAITING_TIME_INTERVAL=10
+RUNTIME=12:00:00
 
 # Cleanup
 echo "Cleaning up ..."
@@ -22,13 +22,14 @@ if [ ! -z "$pid" ]; then
   kill $pid
 fi
 
-ssh $USER bsub -J "code_server" -n 1 -W "$RUNTIME" <<ENDBSUB
+ssh $USER sbatch -J "code_server" -n 1 --time="$RUNTIME" <<END
+#!/bin/sh
 module load gcc/6.3.0 code-server/3.9.3 eth_proxy
 port=\$((3 * 2**14 + RANDOM % 2**14))
 ip=\$(hostname -i)
 echo "\${ip}:\${port}" > \$HOME/VSCode_tunnel
 code-server --bind-addr=\${ip}:\${port}
-ENDBSUB
+END
 
 ssh $USER "while ! [ -e \$HOME/VSCode_tunnel ]; do echo 'Waiting for code server to start, sleep for $WAITING_TIME_INTERVAL sec'; sleep $WAITING_TIME_INTERVAL; done"
 
