@@ -1,6 +1,7 @@
 import random
 
 import transformers
+import torch
 from datasets import load_dataset
 from datasets.iterable_dataset import IterableDataset
 from transformers import PreTrainedTokenizer
@@ -9,6 +10,33 @@ def get_dataset(dataset_name: str = "wmt14", language_pair: str = "de-en", strea
     ds = load_dataset(dataset_name, language_pair, streaming=stream)
     return ds.with_format("torch")
 
+def get_unsupervised_dataset(dataset_name: str = "wmt14", language_pair: str = "de-en") -> IterableDataset:
+    lang_a, lang_b = language_pair.split("-")
+    ds_a = load_dataset(dataset_name, language_pair)
+    ds_b = load_dataset(dataset_name, language_pair)
+    ds_a, ds_b = ds_a.with_format("torch"), ds_b.with_format("torch")
+    return {
+        key: UnsupervisedDataset(ds_a[key], ds_b[key], key_a=lang_a, key_b=lang_b) for key in ds_a.keys()
+    }
+
+class UnsupervisedDataset(torch.utils.data.Dataset):
+    def __init__(self, ds_a, ds_b, key_a, key_b):
+        assert len(ds_a) == len(ds_b)
+        self.ds_a = ds_a.shuffle()
+        self.ds_b = ds_b.shuffle()
+        self.key_a = key_a
+        self.key_b = key_b
+
+    def __getitem__(self, idx):
+        return {
+            "translation": {
+                self.key_a: self.ds_a[idx]["translation"][self.key_a],
+                self.key_b: self.ds_b[idx]["translation"][self.key_b],
+            }
+        }
+    
+    def __len__(self):
+        return len(self.ds_a)
 
 class DataCollatorForSupervisedMT:
     def __init__(self, src_tokenizer: PreTrainedTokenizer, tgt_tokenizer: PreTrainedTokenizer, max_seq_len=256, src_key="de", tgt_key="en"):

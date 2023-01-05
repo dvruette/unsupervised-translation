@@ -18,7 +18,7 @@ sys.path.append(os.getenv("PWD", "."))
 dotenv.load_dotenv()
 
 from src.unsupervised.model import UnsupervisedTranslation
-from src.data import get_dataset, DataCollatorForUnsupervisedMT
+from src.data import get_dataset, get_unsupervised_dataset, DataCollatorForUnsupervisedMT
 
 def train(config):
     if config.resume_from_checkpoint is not None:
@@ -67,13 +67,11 @@ def train(config):
     )
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
 
-    ds = get_dataset(
+    train_ds = get_unsupervised_dataset(
         dataset_name=config.data.dataset_name,
         language_pair=config.data.language_pair,
-        stream=config.data.stream,
-    )
-    train_ds = ds[config.data.train_split]
-    val_ds = ds[config.data.val_split]
+    )[config.data.train_split]
+    val_ds = get_dataset()[config.data.val_split]
 
     collator = DataCollatorForUnsupervisedMT(tokenizer_a, tokenizer_b, max_seq_len=config.training.max_seq_len)
 
