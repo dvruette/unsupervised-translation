@@ -136,6 +136,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         n_groups: int = 16,
         beta_adv: float = 0.25,
         beta_vq: float = 0.1,
+        beta_l2: float = 0.02,
         lr_rec: float = 1e-4,
         lr_critic: float = 1e-4,
         lr_bt: float = 1e-4,
@@ -157,6 +158,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.n_heads = n_heads
         self.beta_adv = beta_adv
         self.beta_vq = beta_vq
+        self.beta_l2 = beta_l2
         self.lr_rec = lr_rec
         self.lr_critic = lr_critic
         self.lr_bt = lr_bt
@@ -270,7 +272,11 @@ class UnsupervisedTranslation(pl.LightningModule):
                 self.log(prefix + key, val, prog_bar=False, sync_dist=True)
 
     def _beta_adv(self, t):
-        return self.beta_adv * max(0, min(1, (t - 1000) / 1000))
+        # return self.beta_adv * max(0, min(1, (t - 1000) / 1000))
+        return self.beta_adv
+
+    def _beta_l2(self, t):
+        return self.beta_l2 * max(0, min(1, (t - 1000) / 1000))
 
     def _backtranslate(self, z, decoder_tgt, tokenizer_tgt):
         with torch.no_grad():
@@ -297,7 +303,14 @@ class UnsupervisedTranslation(pl.LightningModule):
         xs = torch.cat([x0, x1], dim=1)
 
         logits = self.critic(xs)
-        loss = F.binary_cross_entropy_with_logits(logits, labels.float())
+        if self.critic_loss == "wasserstein":
+            neg_loss = ((1 - labels) * logits).sum() / (1 - labels).sum()
+            pos_loss = (labels * logits).sum() / labels.sum()
+            loss = neg_loss + pos_loss
+        elif self.critic_loss == "classifier":
+            loss = F.binary_cross_entropy_with_logits(logits, labels.float())
+        else:
+            raise ValueError(f"Unknown critic loss: {self.critic_loss}")
 
         # if self.critic_loss == "wasserstein":
         #     loss = self.critic(z_a).mean() - self.critic(z_b).mean()
@@ -308,6 +321,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         #            F.binary_cross_entropy_with_logits(logits_b, torch.ones_like(logits_b))
         # elif self.critic_loss == "l2":
         #     loss = F.mse_loss(z_a, z_b)
+
         return loss
 
     def compute_rec_loss(self, batch):
@@ -405,8 +419,14 @@ class UnsupervisedTranslation(pl.LightningModule):
         l_adv_b = self.compute_critic_loss(z_a=enc_hat_a.z_q, z_b=enc_b.z_q.detach())
         l_vq_a = (enc_a.loss + enc_hat_a.loss) / 2
         l_vq_b = (enc_b.loss + enc_hat_b.loss) / 2
+
+        l_l2_a = F.mse_loss(enc_a.z_q.detach(), enc_hat_b.z_q)
+        l_l2_b = F.mse_loss(enc_hat_a.z_q, enc_b.z_q.detach())
         
-        bt_loss = l_cycle_a + l_cycle_b - self._beta_adv(t)*(l_adv_a + l_adv_b) + self.beta_vq*(l_vq_a + l_vq_b)
+        bt_loss = l_cycle_a + l_cycle_b \
+                  + self.beta_vq*(l_vq_a + l_vq_b) \
+                  + self._beta_l2(t)*(l_l2_a + l_l2_b) \
+                  - self._beta_adv(t)*(l_adv_a + l_adv_b)
 
         opt_bt.zero_grad()
         self.manual_backward(bt_loss)
@@ -426,6 +446,9 @@ class UnsupervisedTranslation(pl.LightningModule):
             "l_adv": (l_adv_a + l_adv_b) / 2,
             "l_adv_a": l_adv_a,
             "l_adv_b": l_adv_b,
+            "l_l2": (l_l2_a + l_l2_b) / 2,
+            "l_l2_a": l_l2_a,
+            "l_l2_b": l_l2_b,
             **metrics
         }
 

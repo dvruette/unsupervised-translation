@@ -31,7 +31,8 @@ training:
   devices: 4
   critic_loss: wasserstein
   beta_adv: 0.25
-  beta_vq: 0.25
+  beta_vq: 0.05
+  beta_l2: 0.02
   optimizer:
     lr_rec: 1e-4
     lr_bt: 1e-4

@@ -71,6 +71,7 @@ def main(config):
         n_critic_steps=config.training.optimizer.n_critic_steps,
         beta_adv=config.training.beta_adv,
         beta_vq=config.training.beta_vq,
+        beta_l2=config.training.beta_l2,
         bleu_eval_freq=config.training.val.bleu_eval_freq,
     )
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
