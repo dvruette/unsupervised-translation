@@ -13,30 +13,19 @@ data:
   val_split: validation
   num_workers: 2
 model:
-  use_oracle: True
-  pooling: attention
-  n_pools: 8
-  latent_regularizer: critic
-  use_latent_projection: false
-  d_model: 384
-  n_heads: 6
+  pooling: max
+  n_pools: 1
+  d_model: 256
+  n_heads: 4
   num_encoder_layers: 4
   num_decoder_layers: 4
-  do_vq: true
-  vq:
-    n_codes: 2048
-    n_groups: 16
 training:
   batch_size: 16
   devices: 4
-  critic_loss: wasserstein
-  beta_adv: 0.25
-  beta_vq: 0.25
+  beta_ot: 1e-3
+  beta_ce: 1e-4
   optimizer:
-    lr_rec: 1e-4
-    lr_bt: 1e-4
-    lr_critic: 2e-5
-    n_critic_steps: 4
+    lr: 1e-4
   max_steps: 100000
   max_epochs: 50
   max_seq_len: 128

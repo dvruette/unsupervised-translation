@@ -55,23 +55,17 @@ def main(config):
     model = UnsupervisedTranslation(
         tokenizer_path_a=config.data.tokenizer_path_a,
         tokenizer_path_b=config.data.tokenizer_path_b,
-        do_vq=config.model.do_vq,
         pooling=config.model.pooling,
         n_pools=config.model.n_pools,
         d_model=config.model.d_model,
         n_heads=config.model.n_heads,
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,
-        n_codes=config.model.vq.n_codes,
-        n_groups=config.model.vq.n_groups,
-        lr_rec=config.training.optimizer.lr_rec,
-        lr_critic=config.training.optimizer.lr_critic,
-        lr_bt=config.training.optimizer.lr_bt,
-        critic_loss=config.training.critic_loss,
-        n_critic_steps=config.training.optimizer.n_critic_steps,
-        beta_adv=config.training.beta_adv,
-        beta_vq=config.training.beta_vq,
+        lr=config.training.optimizer.lr,
+        beta_ot=config.training.beta_ot,
+        beta_ce=config.training.beta_ce,
         bleu_eval_freq=config.training.val.bleu_eval_freq,
+        max_steps=config.training.max_steps,
     )
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
 
