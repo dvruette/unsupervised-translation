@@ -157,7 +157,7 @@ def main(config):
                 )
                 pred_tokens_a = model.autoencoder_a.decoder.generate(
                     input_ids=input_ids_a[:, :1],
-                    encoder_hidden_states=enc_a["z"],
+                    encoder_hidden_states=enc_a,
                     max_new_tokens=config.generation.max_new_tokens,
                     eos_token_id=tokenizer_a.sep_token_id,
                     do_sample=config.generation.do_sample,
@@ -172,7 +172,7 @@ def main(config):
                 )
                 pred_tokens_b = model.autoencoder_b.decoder.generate(
                     input_ids=input_ids_a[:, :1],
-                    encoder_hidden_states=enc_b["z"],
+                    encoder_hidden_states=enc_b,
                     max_new_tokens=config.generation.max_new_tokens,
                     eos_token_id=tokenizer_b.eos_token_id,
                     do_sample=config.generation.do_sample,
@@ -186,12 +186,12 @@ def main(config):
 
             if config.do_ppl:
                 # compute perplexity
-                logits_ab = model.decode_b(input_ids_b[:, :-1], enc_a["z"])
+                logits_ab = model.decode_b(input_ids_b[:, :-1], enc_a)
                 ppl_ab, loss_ab = compute_ppl(logits_ab, input_ids_b, pad_id=tokenizer_b.pad_token_id)
                 ppls_ab.extend(ppl_ab)
                 losses_ab.extend(loss_ab)
 
-                logits_ba = model.decode_a(input_ids_a[:, :-1], enc_b["z"])
+                logits_ba = model.decode_a(input_ids_a[:, :-1], enc_b)
                 ppl_ba, loss_ba = compute_ppl(logits_ba, input_ids_a, pad_id=tokenizer_a.pad_token_id)
                 ppls_ba.extend(ppl_ba)
                 losses_ba.extend(loss_ba)
