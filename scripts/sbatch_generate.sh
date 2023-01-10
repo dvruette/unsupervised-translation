@@ -11,8 +11,12 @@ if [ -z "$RUN_PATH" ]; then
 fi
 echo "Found checkpoint $RUN_PATH for run $RUN_ID"
 
-sbatch -J "generate-$1" \
--o "logs/generate-$1-%j.out" \
+export COMMAND="src/unsupervised/generate.py model_path=\"$RUN_PATH\" data.max_batches=-1"
+
+mkdir -p logs
+
+sbatch -J "$RUN_ID-generate" \
+-o "logs/$RUN_ID-generate-%j.out" \
 --mail-type=END,FAIL \
 --nodes=1 \
 --ntasks-per-node=1 \
@@ -21,4 +25,6 @@ sbatch -J "generate-$1" \
 --gpus=1 \
 --gres=gpumem:10G \
 --tmp=5G \
-< scripts/srun_python.sh "src/unsupervised/generate.py model_path=$RUN_PATH"
+< scripts/srun_python.sh 
+
+echo "Job submitted, results will be written to ./logs/$RUN_ID-generate-{job_id}.out"

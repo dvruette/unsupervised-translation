@@ -54,7 +54,10 @@ def main(config):
     print(f"Using device: {device}")
 
     model = UnsupervisedTranslation.load_from_checkpoint(to_absolute_path(config.model_path), map_location=device)
+    model.to(device)
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
+
+    print(f"Model device: {model.device}")
 
     bleu = evaluate.load("bleu")
 
@@ -151,13 +154,13 @@ def main(config):
 
             if config.do_reconstruction:
                 # generate reconstructions
-                enc_a = model.encode_a(
+                beam_enc_a = model.encode_a(
                     input_ids=beam_input_ids_a,
                     attention_mask=beam_attention_mask_a,
                 )
                 pred_tokens_a = model.autoencoder_a.decoder.generate(
                     input_ids=input_ids_a[:, :1],
-                    encoder_hidden_states=enc_a,
+                    encoder_hidden_states=beam_enc_a,
                     max_new_tokens=config.generation.max_new_tokens,
                     eos_token_id=tokenizer_a.sep_token_id,
                     do_sample=config.generation.do_sample,
@@ -166,13 +169,13 @@ def main(config):
                 rec_a = tokenizer_a.batch_decode(pred_tokens_a, skip_special_tokens=True)
                 rec_a = [clean_generated_text(t) for t in rec_a]
 
-                enc_b = model.encode_b(
+                beam_enc_b = model.encode_b(
                     input_ids=beam_input_ids_b,
                     attention_mask=beam_attention_mask_b,
                 )
                 pred_tokens_b = model.autoencoder_b.decoder.generate(
                     input_ids=input_ids_a[:, :1],
-                    encoder_hidden_states=enc_b,
+                    encoder_hidden_states=beam_enc_b,
                     max_new_tokens=config.generation.max_new_tokens,
                     eos_token_id=tokenizer_b.eos_token_id,
                     do_sample=config.generation.do_sample,
@@ -186,6 +189,9 @@ def main(config):
 
             if config.do_ppl:
                 # compute perplexity
+                enc_a = model.encode_a(input_ids_a, attention_mask_a)
+                enc_b = model.encode_b(input_ids_b, attention_mask_b)
+
                 logits_ab = model.decode_b(input_ids_b[:, :-1], enc_a)
                 ppl_ab, loss_ab = compute_ppl(logits_ab, input_ids_b, pad_id=tokenizer_b.pad_token_id)
                 ppls_ab.extend(ppl_ab)

@@ -2,7 +2,7 @@ model_path: outputs/z46wbgoe.ckpt
 max_seq_len: 128
 do_translation: True
 do_reconstruction: True
-do_ppl: False
+do_ppl: True
 data:
   dataset_name: wmt14
   language_pair: de-en
