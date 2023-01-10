@@ -11,7 +11,7 @@ if [ -z "$RUN_PATH" ]; then
 fi
 echo "Found checkpoint $RUN_PATH for run $RUN_ID"
 
-export COMMAND="src/unsupervised/generate.py model_path=\"$RUN_PATH\" data.max_batches=-1"
+export COMMAND="src/unsupervised/generate.py model_path=\"$RUN_PATH\" data.max_batches=-1 data.split=test"
 
 mkdir -p logs
 
