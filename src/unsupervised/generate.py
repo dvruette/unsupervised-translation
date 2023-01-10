@@ -101,6 +101,11 @@ def main(config):
             input_ids_b = tokens_b["input_ids"].to(device)
             attention_mask_b = tokens_b["attention_mask"].to(device)
 
+            xs_rec = tokenizer_a.batch_decode(input_ids_a, skip_special_tokens=True)
+            ys_rec = tokenizer_b.batch_decode(input_ids_b, skip_special_tokens=True)
+            xs_rec = [clean_generated_text(t) for t in xs_rec]
+            ys_rec = [clean_generated_text(t) for t in ys_rec]
+
             batch = {
                 "src_input_ids": input_ids_a,
                 "tgt_input_ids": input_ids_b,
@@ -146,18 +151,18 @@ def main(config):
                 translation_ba = tokenizer_a.batch_decode(pred_tokens_ba, skip_special_tokens=True)
                 translation_ba = [clean_generated_text(t) for t in translation_ba]
 
-                for x, y, ab, ba in zip(xs, ys, translation_ab, translation_ba):
+                for x, y, ab, ba in zip(xs_rec, ys_rec, translation_ab, translation_ba):
                     translations.append({"a": x, "b": y, "a_to_b": ab, "b_to_a": ba})
 
             if config.do_reconstruction:
                 # generate reconstructions
-                enc_a = model.encode_a(
+                beam_enc_a = model.encode_a(
                     input_ids=beam_input_ids_a,
                     attention_mask=beam_attention_mask_a,
                 )
                 pred_tokens_a = model.autoencoder_a.decoder.generate(
                     input_ids=input_ids_a[:, :1],
-                    encoder_hidden_states=enc_a,
+                    encoder_hidden_states=beam_enc_a,
                     max_new_tokens=config.generation.max_new_tokens,
                     eos_token_id=tokenizer_a.sep_token_id,
                     do_sample=config.generation.do_sample,
@@ -166,13 +171,13 @@ def main(config):
                 rec_a = tokenizer_a.batch_decode(pred_tokens_a, skip_special_tokens=True)
                 rec_a = [clean_generated_text(t) for t in rec_a]
 
-                enc_b = model.encode_b(
+                beam_enc_b = model.encode_b(
                     input_ids=beam_input_ids_b,
                     attention_mask=beam_attention_mask_b,
                 )
                 pred_tokens_b = model.autoencoder_b.decoder.generate(
                     input_ids=input_ids_a[:, :1],
-                    encoder_hidden_states=enc_b,
+                    encoder_hidden_states=beam_enc_b,
                     max_new_tokens=config.generation.max_new_tokens,
                     eos_token_id=tokenizer_b.eos_token_id,
                     do_sample=config.generation.do_sample,
@@ -181,11 +186,14 @@ def main(config):
                 rec_b = tokenizer_b.batch_decode(pred_tokens_b, skip_special_tokens=True)
                 rec_b = [clean_generated_text(t) for t in rec_b]
 
-                for x, y, a, b in zip(xs, ys, rec_a, rec_b):
+                for x, y, a, b in zip(xs_rec, ys_rec, rec_a, rec_b):
                     reconstructions.append({"a": x, "b": y, "rec_a": a, "rec_b": b})
 
             if config.do_ppl:
                 # compute perplexity
+                enc_a = model.encode_a(input_ids_a, attention_mask_a)
+                enc_b = model.encode_b(input_ids_b, attention_mask_b)
+
                 logits_ab = model.decode_b(input_ids_b[:, :-1], enc_a)
                 ppl_ab, loss_ab = compute_ppl(logits_ab, input_ids_b, pad_id=tokenizer_b.pad_token_id)
                 ppls_ab.extend(ppl_ab)
