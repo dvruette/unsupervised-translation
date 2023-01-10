@@ -54,6 +54,7 @@ def train(config):
         tokenizer_path_a=config.data.tokenizer_path_a,
         tokenizer_path_b=config.data.tokenizer_path_b,
         pooling=config.model.pooling,
+        alignment=config.model.alignment,
         n_pools=config.model.n_pools,
         d_model=config.model.d_model,
         n_heads=config.model.n_heads,
@@ -66,11 +67,20 @@ def train(config):
     )
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
 
-    train_ds = get_unsupervised_dataset(
+    if config.data.aligned_batches:
+        train_ds = get_dataset(
+            dataset_name=config.data.dataset_name,
+            language_pair=config.data.language_pair,
+        )[config.data.train_split]
+    else:
+        train_ds = get_unsupervised_dataset(
+            dataset_name=config.data.dataset_name,
+            language_pair=config.data.language_pair,
+        )[config.data.train_split]
+    val_ds = get_dataset(
         dataset_name=config.data.dataset_name,
         language_pair=config.data.language_pair,
-    )[config.data.train_split]
-    val_ds = get_dataset()[config.data.val_split]
+    )[config.data.val_split]
 
     collator = DataCollatorForUnsupervisedMT(tokenizer_a, tokenizer_b, max_seq_len=config.training.max_seq_len)
 

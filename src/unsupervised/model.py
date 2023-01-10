@@ -128,6 +128,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         num_decoder_layers: int = 6,
         pooling: Literal["mean", "max", "attention"] = "max",
         n_pools: int = 1,
+        alignment: Literal["ot", "random", "identity"] = "ot",
         d_model: int = 384,
         n_heads: int = 6,
         beta_ot: float = 1e-3,
@@ -140,6 +141,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.save_hyperparameters()
 
         self.pooling_type = pooling
+        self.alignment_type = alignment
         self.n_pools = n_pools
         self.d_model = d_model
         self.n_heads = n_heads
@@ -297,17 +299,26 @@ class UnsupervisedTranslation(pl.LightningModule):
         return (z_a, y_hat_a, attention_mask_a), (z_b, y_hat_b, attention_mask_b)
 
     def get_loss(self, batch):
+        batch_size = batch["src_input_ids"].size(0)
         z_a = self.encode_a(batch["src_input_ids"], attention_mask=batch["src_attention_mask"])
         z_b = self.encode_b(batch["tgt_input_ids"], attention_mask=batch["tgt_attention_mask"])
         shape_a = z_a.shape
         shape_b = z_b.shape
 
-        z_a_flat = z_a.reshape(shape_a[0], -1)
-        z_b_flat = z_b.reshape(shape_b[0], -1)
+        z_a_flat = z_a.reshape(batch_size, -1)
+        z_b_flat = z_b.reshape(batch_size, -1)
         dists = torch.cdist(z_a_flat, z_b_flat, p=2)**2 / (z_a_flat.size(-1) ** 0.5)
-
-        gamma = ot.emd(ot.unif(dists.size(0)), ot.unif(dists.size(1)), dists.cpu().detach().numpy())
-        gamma = torch.from_numpy(gamma).to(self.device)
+        
+        if self.alignment_type == "ot":
+            gamma = ot.emd(ot.unif(batch_size), ot.unif(batch_size), dists.cpu().detach().numpy())
+            gamma = torch.from_numpy(gamma).to(self.device)
+        elif self.alignment_type == "identity":
+            gamma = torch.eye(batch_size, batch_size, device=self.device) / batch_size
+        elif self.alignment_type == "random":
+            idx = torch.randperm(batch_size, device=self.device)
+            gamma = torch.eye(batch_size, batch_size, device=self.device)[idx] / batch_size
+        else:
+            raise ValueError(f"Unknown alignment type: {self.alignment_type}")
 
         src_ids, tgt_ids = torch.where(gamma > 0)
         # gather src and tgt embeddings

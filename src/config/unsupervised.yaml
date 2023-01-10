@@ -12,24 +12,26 @@ data:
   train_split: train
   val_split: validation
   num_workers: 2
+  aligned_batches: true
 model:
   pooling: max
   n_pools: 1
+  alignment: ot
   d_model: 256
   n_heads: 4
-  num_encoder_layers: 6
+  num_encoder_layers: 4
   num_decoder_layers: 6
 training:
-  batch_size: 32
-  accumulate_batches: 2
+  batch_size: 64
+  accumulate_batches: 1
   devices: 4
   beta_ot: 5e-3
-  beta_ce: 0.5
+  beta_ce: 1.0
   optimizer:
-    lr: 1e-4
-  max_steps: 400_000
+    lr: 2e-4
+  max_steps: 100_000
   max_epochs: 50
-  max_seq_len: 64
+  max_seq_len: 56
   strategy: ddp
   val:
     check_interval: 512
