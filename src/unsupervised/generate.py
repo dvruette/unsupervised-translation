@@ -54,7 +54,10 @@ def main(config):
     print(f"Using device: {device}")
 
     model = UnsupervisedTranslation.load_from_checkpoint(to_absolute_path(config.model_path), map_location=device)
+    model.to(device)
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
+
+    print(f"Model device: {model.device}")
 
     bleu = evaluate.load("bleu")
 
