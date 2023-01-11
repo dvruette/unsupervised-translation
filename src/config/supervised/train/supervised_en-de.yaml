@@ -4,19 +4,22 @@ hydra:
 
 data:
   dataset_name: wmt14
-  language_pair: de-en
+  language_pair: en-de
   stream: False
   train_split: train
   val_split: validation
-  num_workers: 8
+  num_workers: 1
 
 training:
-  batch_size: 16
-  gradient_accumulation: 2
+  batch_size: 8
+  gradient_accumulation: 1
   max_seq_len: 256
   learning_rate: 0.0001
   max_steps: 100000
   max_epochs: 50
+  strategy: ddp
+  num_beams: 4
   val:
-    check_interval: 256
-    limit_batches: 128
+    check_interval: 512
+    limit_batches: 512
+    bleu_eval_freq: 2048
