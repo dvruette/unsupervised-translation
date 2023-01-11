@@ -182,7 +182,7 @@ def main(config):
                     input_ids=input_ids_a[:, :1],
                     encoder_hidden_states=beam_enc_b,
                     max_new_tokens=config.generation.max_new_tokens,
-                    eos_token_id=tokenizer_b.eos_token_id,
+                    eos_token_id=tokenizer_b.sep_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
                 )
@@ -214,12 +214,12 @@ def main(config):
     print("---")
 
     if config.do_translation:
-        predictions = [t["b"] for t in translations]
-        references = [[t["a_to_b"]] for t in translations]
+        predictions = [t["a_to_b"] for t in translations]
+        references = [[t["b"]] for t in translations]
         bleu_ab = bleu.compute(predictions=predictions, references=references)
 
-        predictions = [t["a"] for t in translations]
-        references = [[t["b_to_a"]] for t in translations]
+        predictions = [t["b_to_a"] for t in translations]
+        references = [[t["a"]] for t in translations]
         bleu_ba = bleu.compute(predictions=predictions, references=references)
 
         print("Translation:")
