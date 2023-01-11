@@ -29,7 +29,7 @@ def compute_ppl(logits, labels, pad_id=0) -> Tuple[List[float], List[float]]:
     # normalize for sequence length
     t = (labels[:, 1:] != pad_id).sum(dim=1)
     ppl = (entropy.sum(dim=1) / t).exp()
-    return ppl.tolist(), [loss]
+    return ppl.tolist(), [loss.item()]
 
 def clean_generated_text(text: str) -> str:
     """
@@ -207,8 +207,8 @@ def main(config):
                 ppls_ba.extend(ppl_ba)
                 losses_ba.extend(loss_ba)
 
-
     # print metrics
+    print()
     print("Metrics:")
     print(pd.DataFrame(metrics).mean())
     print("---")
@@ -251,7 +251,6 @@ def main(config):
 
         with open("reconstructions.json", "w") as f:
             json.dump(reconstructions, f, ensure_ascii=False, indent=2)
-
 
     if config.do_ppl:
         print("Perplexity:")

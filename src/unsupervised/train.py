@@ -61,6 +61,7 @@ def train(config):
         num_encoder_layers=config.model.num_encoder_layers,
         num_decoder_layers=config.model.num_decoder_layers,
         lr=config.training.optimizer.lr,
+        beta_dae=config.training.beta_dae,
         beta_ot=config.training.beta_ot,
         beta_ce=config.training.beta_ce,
         bleu_eval_freq=config.training.val.bleu_eval_freq,

@@ -25,6 +25,7 @@ training:
   batch_size: 64
   accumulate_batches: 1
   devices: 4
+  beta_dae: 1.0
   beta_ot: 5e-3
   beta_ce: 1.0
   optimizer:

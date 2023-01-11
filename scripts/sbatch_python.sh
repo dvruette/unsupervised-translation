@@ -4,7 +4,7 @@ MAX_TIME=24:00:00
 N_CPU=4
 N_GPU=4
 
-export COMMAND="$2"
+export COMMAND="$1"
 
 sbatch -J "$1" \
 --nodes=1 \

@@ -131,8 +131,9 @@ class UnsupervisedTranslation(pl.LightningModule):
         alignment: Literal["ot", "random", "identity"] = "ot",
         d_model: int = 384,
         n_heads: int = 6,
+        beta_dae: float = 1.0,
         beta_ot: float = 1e-3,
-        beta_ce: float = 1e-4,
+        beta_ce: float = 1.0,
         lr: float = 1e-4,
         bleu_eval_freq: int = 2048,
         max_steps: int = 100_000,
@@ -145,6 +146,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         self.n_pools = n_pools
         self.d_model = d_model
         self.n_heads = n_heads
+        self.beta_dae = beta_dae
         self.beta_ot = beta_ot
         self.beta_ce = beta_ce
         self.lr = lr
@@ -344,7 +346,7 @@ class UnsupervisedTranslation(pl.LightningModule):
         l_rec_b = F.cross_entropy(logits_b.transpose(1, 2), batch["tgt_labels"][:, 1:], ignore_index=self.tokenizer_b.pad_token_id).sum(-1).mean()
         l_rec = l_rec_a + l_rec_b
 
-        loss = l_rec + jdot_loss
+        loss = self.beta_dae*l_rec + jdot_loss
 
         return {
             "loss": loss,

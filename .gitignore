@@ -2,7 +2,7 @@ outputs
 wmt*_scripts
 lsf.*
 slurm-*
-logs
+logs*
 
 # Marvin Stuff
 pyrightconfig.json
