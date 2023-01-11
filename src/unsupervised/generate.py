@@ -29,7 +29,7 @@ def compute_ppl(logits, labels, pad_id=0) -> Tuple[List[float], List[float]]:
     # normalize for sequence length
     t = (labels[:, 1:] != pad_id).sum(dim=1)
     ppl = (entropy.sum(dim=1) / t).exp()
-    return ppl.tolist(), [loss]
+    return ppl.tolist(), [loss.item()]
 
 def clean_generated_text(text: str) -> str:
     """
@@ -54,7 +54,10 @@ def main(config):
     print(f"Using device: {device}")
 
     model = UnsupervisedTranslation.load_from_checkpoint(to_absolute_path(config.model_path), map_location=device)
+    model.to(device)
     tokenizer_a, tokenizer_b = model.tokenizer_a, model.tokenizer_b
+
+    print(f"Model device: {model.device}")
 
     bleu = evaluate.load("bleu")
 
@@ -101,11 +104,20 @@ def main(config):
             input_ids_b = tokens_b["input_ids"].to(device)
             attention_mask_b = tokens_b["attention_mask"].to(device)
 
+            xs_rec = tokenizer_a.batch_decode(input_ids_a, skip_special_tokens=True)
+            ys_rec = tokenizer_b.batch_decode(input_ids_b, skip_special_tokens=True)
+            xs_rec = [clean_generated_text(t) for t in xs_rec]
+            ys_rec = [clean_generated_text(t) for t in ys_rec]
+
             batch = {
-                "input_ids": input_ids_a,
-                "labels": input_ids_b,
-                "attention_mask_src": attention_mask_a,
-                "attention_mask_tgt": attention_mask_b,
+                "src_input_ids": input_ids_a,
+                "tgt_input_ids": input_ids_b,
+                "src_labels": input_ids_a,
+                "tgt_labels": input_ids_b,
+                "src_attention_mask": attention_mask_a,
+                "tgt_attention_mask": attention_mask_b,
+                "src_label_mask": attention_mask_a,
+                "tgt_label_mask": attention_mask_b,
             }
             ms = model.get_loss(batch)
             metrics.append(ms)
@@ -126,6 +138,8 @@ def main(config):
                     eos_token_id=tokenizer_b.sep_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
+                    length_penalty=0.6,
+                    early_stopping=True,
                 )
                 translation_ab = tokenizer_b.batch_decode(pred_tokens_ab, skip_special_tokens=True)
                 translation_ab = [clean_generated_text(t) for t in translation_ab]
@@ -138,73 +152,82 @@ def main(config):
                     eos_token_id=tokenizer_a.sep_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
+                    length_penalty=0.6,
+                    early_stopping=True,
                 )
                 translation_ba = tokenizer_a.batch_decode(pred_tokens_ba, skip_special_tokens=True)
                 translation_ba = [clean_generated_text(t) for t in translation_ba]
 
-                for x, y, ab, ba in zip(xs, ys, translation_ab, translation_ba):
+                for x, y, ab, ba in zip(xs_rec, ys_rec, translation_ab, translation_ba):
                     translations.append({"a": x, "b": y, "a_to_b": ab, "b_to_a": ba})
 
             if config.do_reconstruction:
                 # generate reconstructions
-                enc_a = model.encode_a(
+                beam_enc_a = model.encode_a(
                     input_ids=beam_input_ids_a,
                     attention_mask=beam_attention_mask_a,
                 )
                 pred_tokens_a = model.autoencoder_a.decoder.generate(
                     input_ids=input_ids_a[:, :1],
-                    encoder_hidden_states=enc_a["z"],
-                    max_new_tokens=config.max_new_tokens,
+                    encoder_hidden_states=beam_enc_a,
+                    max_new_tokens=config.generation.max_new_tokens,
                     eos_token_id=tokenizer_a.sep_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
+                    length_penalty=0.6,
+                    early_stopping=True,
                 )
                 rec_a = tokenizer_a.batch_decode(pred_tokens_a, skip_special_tokens=True)
                 rec_a = [clean_generated_text(t) for t in rec_a]
 
-                enc_b = model.encode_b(
+                beam_enc_b = model.encode_b(
                     input_ids=beam_input_ids_b,
                     attention_mask=beam_attention_mask_b,
                 )
                 pred_tokens_b = model.autoencoder_b.decoder.generate(
                     input_ids=input_ids_a[:, :1],
-                    encoder_hidden_states=enc_b["z"],
-                    max_new_tokens=config.max_new_tokens,
-                    eos_token_id=tokenizer_b.eos_token_id,
+                    encoder_hidden_states=beam_enc_b,
+                    max_new_tokens=config.generation.max_new_tokens,
+                    eos_token_id=tokenizer_b.sep_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
+                    length_penalty=0.6,
+                    early_stopping=True,
                 )
                 rec_b = tokenizer_b.batch_decode(pred_tokens_b, skip_special_tokens=True)
                 rec_b = [clean_generated_text(t) for t in rec_b]
 
-                for x, y, a, b in zip(xs, ys, rec_a, rec_b):
+                for x, y, a, b in zip(xs_rec, ys_rec, rec_a, rec_b):
                     reconstructions.append({"a": x, "b": y, "rec_a": a, "rec_b": b})
 
             if config.do_ppl:
                 # compute perplexity
-                logits_ab = model.decode_b(input_ids_b[:, :-1], enc_a["z"])
+                enc_a = model.encode_a(input_ids_a, attention_mask_a)
+                enc_b = model.encode_b(input_ids_b, attention_mask_b)
+
+                logits_ab = model.decode_b(input_ids_b[:, :-1], enc_a)
                 ppl_ab, loss_ab = compute_ppl(logits_ab, input_ids_b, pad_id=tokenizer_b.pad_token_id)
                 ppls_ab.extend(ppl_ab)
                 losses_ab.extend(loss_ab)
 
-                logits_ba = model.decode_a(input_ids_a[:, :-1], enc_b["z"])
+                logits_ba = model.decode_a(input_ids_a[:, :-1], enc_b)
                 ppl_ba, loss_ba = compute_ppl(logits_ba, input_ids_a, pad_id=tokenizer_a.pad_token_id)
                 ppls_ba.extend(ppl_ba)
                 losses_ba.extend(loss_ba)
 
-
     # print metrics
+    print()
     print("Metrics:")
     print(pd.DataFrame(metrics).mean())
     print("---")
 
     if config.do_translation:
-        predictions = [t["b"] for t in translations]
-        references = [[t["a_to_b"]] for t in translations]
+        predictions = [t["a_to_b"] for t in translations]
+        references = [[t["b"]] for t in translations]
         bleu_ab = bleu.compute(predictions=predictions, references=references)
 
-        predictions = [t["a"] for t in translations]
-        references = [[t["b_to_a"]] for t in translations]
+        predictions = [t["b_to_a"] for t in translations]
+        references = [[t["a"]] for t in translations]
         bleu_ba = bleu.compute(predictions=predictions, references=references)
 
         print("Translation:")
@@ -236,7 +259,6 @@ def main(config):
 
         with open("reconstructions.json", "w") as f:
             json.dump(reconstructions, f, ensure_ascii=False, indent=2)
-
 
     if config.do_ppl:
         print("Perplexity:")

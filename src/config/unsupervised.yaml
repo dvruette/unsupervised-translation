@@ -1,7 +1,8 @@
 hydra:
   run:
     dir: ${oc.env:SCRATCH,.}/outputs/unsupervised/${now:%Y-%m-%d}/${now:%H-%M-%S}
-group: supervised-latent
+group: jdot
+resume_from_checkpoint: null
 data:
   dataset_name: wmt14
   language_pair: de-en
@@ -10,39 +11,30 @@ data:
   stream: False
   train_split: train
   val_split: validation
-  num_workers: 8
+  num_workers: 2
+  aligned_batches: true
 model:
-  use_oracle: True
-  pooling: attention
-  n_pools: 8
-  latent_regularizer: vq
-  use_latent_projection: false
-  distance_metric: l2
+  pooling: max
+  n_pools: 1
+  alignment: ot
+  d_model: 256
+  n_heads: 4
   num_encoder_layers: 4
   num_decoder_layers: 6
-  vq:
-    n_codes: 2048
-    n_groups: 8
 training:
   batch_size: 64
-  devices: 4
   accumulate_batches: 1
-  beta_cycle: 0.1
-  beta_vq: 0.1
-  beta_cycle_warmup_steps: 0
-  beta_vq_warmup_steps: 100
-  cycle:
-    num_beams: 1
-    do_sample: true
+  devices: 4
+  beta_dae: 1.0
+  beta_ot: 5e-3
+  beta_ce: 1.0
   optimizer:
-    lr: 1e-4
-    warmup_steps: 0
-    max_steps: 100000
-    schedule: cosine
-  max_steps: 100000
+    lr: 2e-4
+  max_steps: 100_000
   max_epochs: 50
-  max_seq_len: 128
-  strategy: dp
+  max_seq_len: 56
+  strategy: ddp
   val:
-    check_interval: 256
+    check_interval: 512
     limit_batches: 128
+    bleu_eval_freq: 2048

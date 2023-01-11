@@ -3,6 +3,17 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
+
+class VQOutput:
+    def __init__(self, z, z_q, codes, loss, avg_usage=None, usage=None, entropy=None):
+        self.z = z
+        self.z_q = z_q
+        self.codes = codes
+        self.loss = loss
+        self.avg_usage = avg_usage
+        self.usage = usage
+        self.entropy = entropy
+
 # Implementation adapted from https://github.com/rosinality/vq-vae-2-pytorch/blob/master/vqvae.py
 # Random restarts adapted from https://github.com/openai/jukebox/blob/master/jukebox/vqvae/bottleneck.py
 class VectorQuantizeEMA(nn.Module):
@@ -54,8 +65,9 @@ class VectorQuantizeEMA(nn.Module):
         else:
             update_metrics = {}
 
-        return dict(
-            z=quantize,
+        return VQOutput(
+            z=x,
+            z_q=quantize,
             codes=codes,
             loss=diff,
             **update_metrics
