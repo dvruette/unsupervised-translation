@@ -138,6 +138,8 @@ def main(config):
                     eos_token_id=tokenizer_b.sep_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
+                    length_penalty=0.6,
+                    early_stopping=True,
                 )
                 translation_ab = tokenizer_b.batch_decode(pred_tokens_ab, skip_special_tokens=True)
                 translation_ab = [clean_generated_text(t) for t in translation_ab]
@@ -150,6 +152,8 @@ def main(config):
                     eos_token_id=tokenizer_a.sep_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
+                    length_penalty=0.6,
+                    early_stopping=True,
                 )
                 translation_ba = tokenizer_a.batch_decode(pred_tokens_ba, skip_special_tokens=True)
                 translation_ba = [clean_generated_text(t) for t in translation_ba]
@@ -170,6 +174,8 @@ def main(config):
                     eos_token_id=tokenizer_a.sep_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
+                    length_penalty=0.6,
+                    early_stopping=True,
                 )
                 rec_a = tokenizer_a.batch_decode(pred_tokens_a, skip_special_tokens=True)
                 rec_a = [clean_generated_text(t) for t in rec_a]
@@ -185,6 +191,8 @@ def main(config):
                     eos_token_id=tokenizer_b.sep_token_id,
                     do_sample=config.generation.do_sample,
                     num_beams=config.generation.num_beams,
+                    length_penalty=0.6,
+                    early_stopping=True,
                 )
                 rec_b = tokenizer_b.batch_decode(pred_tokens_b, skip_special_tokens=True)
                 rec_b = [clean_generated_text(t) for t in rec_b]
