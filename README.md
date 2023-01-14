@@ -13,6 +13,24 @@ To be able to submit runs on your own, you'll need to create an environment file
 WANDB_API_KEY=<your_api_key>
 ```
 
+### Running Experiments
+
+There exist two training scripts: One for the supervised baseline and one for unsupervised training.
+
+To run the supervised baseline, type:
+```
+python src/supervised/train.py
+```
+
+To run the unsupervised approach, type:
+```
+python src/unsupervised/train.py
+```
+
+The corresponding configs are located in `src/configs/*.yaml`.
+
+Evaluation of models is done with `src/generate.py` for supervised models and `src/unsupervised/generate.py` for unsupervised models.
+
 ## Euler
 
 ### Setup
